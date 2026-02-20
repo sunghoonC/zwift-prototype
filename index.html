@@ -33,7 +33,7 @@
 
 <div id="weather-panel">
   <div class="panel-header" onclick="this.parentElement.classList.toggle('collapsed')">
-    <h3>Weather Control</h3><span>▾</span>
+    <h3>Weather Control</h3><span>&#9662;</span>
   </div>
   <div class="mode-toggle">
     <button id="btn-auto" class="active" onclick="window.setWeatherMode('auto')">실시간</button>
@@ -79,31 +79,52 @@
 <script type="module">
 import * as THREE from 'three';
 
-// ── Fixed 9:16 portrait aspect ratio ──
-const ASPECT = 9 / 16;
+// ══════════════════════════════════════════════════════════════
+//  Shared helpers
+// ══════════════════════════════════════════════════════════════
+const _d = new THREE.Object3D();
+const _c = new THREE.Color();
+const unitBox = new THREE.BoxGeometry(1, 1, 1);
 
-function calcSize() {
-  const ww = window.innerWidth;
-  const wh = window.innerHeight;
-  let w, h;
-  if (ww / wh > ASPECT) {
-    h = wh;
-    w = Math.floor(h * ASPECT);
-  } else {
-    w = ww;
-    h = Math.floor(w / ASPECT);
+function inst(mat, data, opts = {}) {
+  const n = data.length;
+  if (!n) return null;
+  const m = new THREE.InstancedMesh(unitBox, mat, n);
+  for (let i = 0; i < n; i++) {
+    const t = data[i];
+    _d.position.set(t.x, t.y, t.z);
+    _d.scale.set(t.sx, t.sy, t.sz);
+    _d.rotation.set(t.rx || 0, t.ry || 0, t.rz || 0);
+    _d.updateMatrix();
+    m.setMatrixAt(i, _d.matrix);
   }
-  return { w, h };
+  m.instanceMatrix.needsUpdate = true;
+  m.castShadow = !!opts.shadow;
+  m.receiveShadow = !!opts.recv;
+  if (opts.noCull) m.frustumCulled = false;
+  return m;
 }
 
+function addInst(m) { if (m) { m.computeBoundingSphere(); scene.add(m); } }
+
+// ══════════════════════════════════════════════════════════════
+//  Renderer (optimized for low-end GPU)
+// ══════════════════════════════════════════════════════════════
+const ASPECT = 9 / 16;
+function calcSize() {
+  const ww = window.innerWidth, wh = window.innerHeight;
+  let w, h;
+  if (ww / wh > ASPECT) { h = wh; w = Math.floor(h * ASPECT); }
+  else { w = ww; h = Math.floor(w / ASPECT); }
+  return { w, h };
+}
 const { w: initW, h: initH } = calcSize();
 
-// ── Renderer ──
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: false });
 renderer.setSize(initW, initH);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(1);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.VSMShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.6;
 document.body.appendChild(renderer.domElement);
@@ -111,18 +132,15 @@ document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87CEEB);
 scene.fog = new THREE.Fog(0x87CEEB, 100, 200);
-
 const camera = new THREE.PerspectiveCamera(55, ASPECT, 0.5, 500);
 const clock = new THREE.Clock();
 
-// ── Weather state (updated from API) ──
+// ══════════════════════════════════════════════════════════════
+//  Weather state
+// ══════════════════════════════════════════════════════════════
 let weatherMode = 'auto';
-const weather = {
-  windSpeed: 3, windDir: 0, code: 0, isDay: 1,
-  temp: 15, hour: new Date().getHours(),
-};
+const weather = { windSpeed: 3, windDir: 0, code: 0, isDay: 1, temp: 15, hour: new Date().getHours() };
 
-// Fetch real weather (Open-Meteo, no API key needed)
 async function fetchWeatherData() {
   try {
     const pos = await new Promise((res) => {
@@ -145,13 +163,13 @@ async function fetchWeatherData() {
     updateWeatherStatus();
   } catch (e) { console.warn('Weather fetch failed, using defaults'); applyWeather(); }
 }
-// Don't block init — fire and forget
 fetchWeatherData();
 setInterval(() => { if (weatherMode === 'auto') fetchWeatherData(); }, 600000);
 
-// ── Time-of-day presets ──
+// ══════════════════════════════════════════════════════════════
+//  Time-of-day presets
+// ══════════════════════════════════════════════════════════════
 function getTimePreset(hour) {
-  // All presets keep high enough ambient + exposure so objects remain clearly visible
   if (hour >= 21 || hour < 5)   return { sky: 0x0f1535, fog: 0x0f1535, ambient: 0x4466aa, ambientI: 0.7, hemiSky: 0x223355, hemiGround: 0x222233, hemiI: 0.5, sunColor: 0x8899cc, sunI: 0.5, exposure: 1.3, shadowI: 0.1 };
   if (hour >= 5 && hour < 7)    return { sky: 0xff8844, fog: 0xdd7744, ambient: 0xcc8866, ambientI: 0.7, hemiSky: 0xff9955, hemiGround: 0x554433, hemiI: 0.6, sunColor: 0xffaa55, sunI: 0.9, exposure: 1.4, shadowI: 0.2 };
   if (hour >= 7 && hour < 10)   return { sky: 0x99ccee, fog: 0x99ccee, ambient: 0x99aabb, ambientI: 0.7, hemiSky: 0x99ccee, hemiGround: 0x556633, hemiI: 0.6, sunColor: 0xfff0d0, sunI: 1.2, exposure: 1.5, shadowI: 0.25 };
@@ -160,7 +178,9 @@ function getTimePreset(hour) {
   /* 19-21 */                    return { sky: 0x1a2744, fog: 0x1a2744, ambient: 0x556688, ambientI: 0.6, hemiSky: 0x334466, hemiGround: 0x333333, hemiI: 0.5, sunColor: 0x9999bb, sunI: 0.6, exposure: 1.3, shadowI: 0.15 };
 }
 
-// ── Lighting (dynamic references) ──
+// ══════════════════════════════════════════════════════════════
+//  Lighting
+// ══════════════════════════════════════════════════════════════
 const ambientLight = new THREE.AmbientLight(0x8899bb, 0.8);
 scene.add(ambientLight);
 const hemiLight = new THREE.HemisphereLight(0x87CEEB, 0x556633, 0.7);
@@ -169,61 +189,89 @@ scene.add(hemiLight);
 const sun = new THREE.DirectionalLight(0xfff4e0, 1.4);
 sun.position.set(80, 100, 60);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(1024, 1024);
 sun.shadow.camera.left = -60;
 sun.shadow.camera.right = 60;
 sun.shadow.camera.top = 60;
 sun.shadow.camera.bottom = -60;
 sun.shadow.camera.near = 10;
 sun.shadow.camera.far = 300;
-sun.shadow.radius = 8;
-sun.shadow.blurSamples = 16;
+sun.shadow.radius = 4;
 sun.shadow.intensity = 0.3;
 sun.shadow.bias = -0.0005;
 scene.add(sun);
 scene.add(sun.target);
 
-// ── Street lamp material (shared, updated by applyWeather) ──
+// ── Lamp material (shared, updated by applyWeather) ──
 const lampMat = new THREE.MeshStandardMaterial({ color: 0xffeecc, emissive: 0xffeecc, emissiveIntensity: 0.3 });
 let lampLightIntensity = 0;
 
-// ── Rain/Snow particle systems ──
-const rainDrops = [];
-const snowFlakes = [];
+// ══════════════════════════════════════════════════════════════
+//  Rain / Snow — pre-allocated InstancedMesh
+// ══════════════════════════════════════════════════════════════
+const MAX_RAIN = 800, MAX_SNOW = 500;
+const rainMat = new THREE.MeshBasicMaterial({ color: 0xaaccff, transparent: true, opacity: 0.6 });
+const snowMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 });
+
 const rainGroup = new THREE.Group();
 const snowGroup = new THREE.Group();
 scene.add(rainGroup);
 scene.add(snowGroup);
 
-// intensity: { count, dropLen, dropW, speed, opacity, spread }
+const rainMesh = new THREE.InstancedMesh(unitBox, rainMat, MAX_RAIN);
+rainMesh.count = 0; rainMesh.frustumCulled = false;
+rainGroup.add(rainMesh);
+
+const snowMesh = new THREE.InstancedMesh(unitBox, snowMat, MAX_SNOW);
+snowMesh.count = 0; snowMesh.frustumCulled = false;
+snowGroup.add(snowMesh);
+
+const rainData = [];
+const snowData = [];
+
 function setupPrecipitation(type, cfg) {
-  rainGroup.clear(); rainDrops.length = 0;
-  snowGroup.clear(); snowFlakes.length = 0;
-  if (!cfg) return;
-  const { count, spread } = cfg;
+  rainData.length = 0;
+  snowData.length = 0;
+  if (!cfg) { rainMesh.count = 0; snowMesh.count = 0; return; }
+
   if (type === 'rain') {
-    const mat = new THREE.MeshBasicMaterial({ color: 0xaaccff, transparent: true, opacity: cfg.opacity });
+    rainMat.opacity = cfg.opacity;
+    const count = Math.min(cfg.count, MAX_RAIN);
     for (let i = 0; i < count; i++) {
-      const len = cfg.dropLen * (0.7 + Math.random() * 0.6);
-      const w = cfg.dropW * (0.7 + Math.random() * 0.6);
-      const drop = new THREE.Mesh(new THREE.BoxGeometry(w, len, w), mat);
-      drop.position.set((Math.random() - 0.5) * spread, Math.random() * 20, (Math.random() - 0.5) * spread);
-      rainGroup.add(drop);
-      rainDrops.push({ mesh: drop, speed: cfg.speed * (0.8 + Math.random() * 0.4), ox: (Math.random() - 0.5) * spread, oz: (Math.random() - 0.5) * spread });
+      rainData.push({
+        y: Math.random() * 20,
+        ox: (Math.random() - 0.5) * cfg.spread,
+        oz: (Math.random() - 0.5) * cfg.spread,
+        speed: cfg.speed * (0.8 + Math.random() * 0.4),
+        len: cfg.dropLen * (0.7 + Math.random() * 0.6),
+        w: cfg.dropW * (0.7 + Math.random() * 0.6),
+        spread: cfg.spread,
+      });
     }
+    rainMesh.count = count;
+    snowMesh.count = 0;
   } else if (type === 'snow') {
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: cfg.opacity });
+    snowMat.opacity = cfg.opacity;
+    const count = Math.min(cfg.count, MAX_SNOW);
     for (let i = 0; i < count; i++) {
-      const s = cfg.flakeSize * (0.6 + Math.random() * 0.8);
-      const flake = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), mat);
-      flake.position.set((Math.random() - 0.5) * spread, Math.random() * 20, (Math.random() - 0.5) * spread);
-      snowGroup.add(flake);
-      snowFlakes.push({ mesh: flake, speed: cfg.speed * (0.6 + Math.random() * 0.8), drift: Math.random() * Math.PI * 2, ox: (Math.random() - 0.5) * spread, oz: (Math.random() - 0.5) * spread });
+      snowData.push({
+        y: Math.random() * 20,
+        ox: (Math.random() - 0.5) * cfg.spread,
+        oz: (Math.random() - 0.5) * cfg.spread,
+        speed: cfg.speed * (0.6 + Math.random() * 0.8),
+        drift: Math.random() * Math.PI * 2,
+        size: cfg.flakeSize * (0.6 + Math.random() * 0.8),
+        spread: cfg.spread,
+      });
     }
+    snowMesh.count = count;
+    rainMesh.count = 0;
   }
 }
 
-// ── Apply weather + time to scene ──
+// ══════════════════════════════════════════════════════════════
+//  Apply weather + time
+// ══════════════════════════════════════════════════════════════
 function applyWeather() {
   if (weatherMode !== 'manual') weather.hour = new Date().getHours();
   const tp = getTimePreset(weather.hour);
@@ -234,106 +282,60 @@ function applyWeather() {
   const isRain = (cc >= 61 && cc <= 67) || (cc >= 80 && cc <= 82) || cc >= 95;
   const isSnow = (cc >= 71 && cc <= 77) || (cc >= 85 && cc <= 86);
 
-  let skyColor = tp.sky;
-  let fogColor = tp.fog;
-  let sunIntensity = tp.sunI;
-  let exposure = tp.exposure;
+  let skyColor = tp.sky, fogColor = tp.fog, sunIntensity = tp.sunI, exposure = tp.exposure;
 
-  // Graduated sky darkening based on precipitation intensity
   if (isRain || cc >= 95) {
     const heaviness = cc >= 95 ? 0.8 : cc >= 65 ? 0.7 : cc >= 63 ? 0.55 : 0.4;
-    const gray = new THREE.Color(0x666666);
-    const base = new THREE.Color(tp.sky);
-    base.lerp(gray, heaviness);
-    skyColor = base.getHex();
-    fogColor = skyColor;
-    sunIntensity *= (1 - heaviness * 0.7);
-    exposure *= (1 - heaviness * 0.2);
+    const base = new THREE.Color(tp.sky).lerp(new THREE.Color(0x666666), heaviness);
+    skyColor = base.getHex(); fogColor = skyColor;
+    sunIntensity *= (1 - heaviness * 0.7); exposure *= (1 - heaviness * 0.2);
   } else if (isDrizzle) {
-    const gray = new THREE.Color(0x888888);
-    const base = new THREE.Color(tp.sky);
-    base.lerp(gray, 0.3);
-    skyColor = base.getHex();
-    fogColor = skyColor;
-    sunIntensity *= 0.7;
+    const base = new THREE.Color(tp.sky).lerp(new THREE.Color(0x888888), 0.3);
+    skyColor = base.getHex(); fogColor = skyColor; sunIntensity *= 0.7;
   } else if (isOvercast) {
-    const gray = new THREE.Color(0x999999);
-    const base = new THREE.Color(tp.sky);
-    base.lerp(gray, 0.4);
-    skyColor = base.getHex();
-    fogColor = skyColor;
-    sunIntensity *= 0.6;
+    const base = new THREE.Color(tp.sky).lerp(new THREE.Color(0x999999), 0.4);
+    skyColor = base.getHex(); fogColor = skyColor; sunIntensity *= 0.6;
   }
   if (isSnow) {
     const heaviness = cc >= 75 ? 0.6 : cc >= 73 ? 0.4 : 0.25;
-    const sn = new THREE.Color(0xccccdd);
-    const base = new THREE.Color(tp.sky);
-    base.lerp(sn, heaviness);
-    skyColor = base.getHex();
-    fogColor = skyColor;
-    sunIntensity *= (1 - heaviness * 0.5);
-    exposure *= (1 - heaviness * 0.15);
+    const base = new THREE.Color(tp.sky).lerp(new THREE.Color(0xccccdd), heaviness);
+    skyColor = base.getHex(); fogColor = skyColor;
+    sunIntensity *= (1 - heaviness * 0.5); exposure *= (1 - heaviness * 0.15);
   }
 
   scene.background.setHex(skyColor);
   scene.fog.color.setHex(fogColor);
-  ambientLight.color.setHex(tp.ambient);
-  ambientLight.intensity = tp.ambientI;
-  hemiLight.color.setHex(tp.hemiSky);
-  hemiLight.groundColor.setHex(tp.hemiGround);
-  hemiLight.intensity = tp.hemiI;
-  sun.color.setHex(tp.sunColor);
-  sun.intensity = sunIntensity;
+  ambientLight.color.setHex(tp.ambient); ambientLight.intensity = tp.ambientI;
+  hemiLight.color.setHex(tp.hemiSky); hemiLight.groundColor.setHex(tp.hemiGround); hemiLight.intensity = tp.hemiI;
+  sun.color.setHex(tp.sunColor); sun.intensity = sunIntensity;
   sun.shadow.intensity = tp.shadowI;
   renderer.toneMappingExposure = exposure;
 
-  // Street lamps: glow bright at night, dim during day
   const h = weather.hour;
   const lampGlow = (h >= 19 || h < 6) ? 1.5 : (h >= 17 || h < 7) ? 0.6 : 0.15;
   lampMat.emissiveIntensity = lampGlow;
-  // PointLight intensity: strong at night, off during day
   lampLightIntensity = (h >= 19 || h < 6) ? 3.0 : (h >= 17 || h < 7) ? 1.0 : 0;
 
   // Precipitation — graduated stages
   const c = weather.code;
-  if (c >= 95) {
-    // Thunderstorm — extreme rain
-    setupPrecipitation('rain', { count: 800, dropLen: 0.5, dropW: 0.05, speed: 22, opacity: 0.8, spread: 70 });
-  } else if (c === 65 || c === 82) {
-    // Heavy rain
-    setupPrecipitation('rain', { count: 600, dropLen: 0.45, dropW: 0.045, speed: 20, opacity: 0.7, spread: 70 });
-  } else if (c === 63 || c === 81) {
-    // Moderate rain
-    setupPrecipitation('rain', { count: 350, dropLen: 0.35, dropW: 0.035, speed: 16, opacity: 0.6, spread: 65 });
-  } else if (c === 61 || c === 80) {
-    // Light rain
-    setupPrecipitation('rain', { count: 180, dropLen: 0.25, dropW: 0.03, speed: 13, opacity: 0.5, spread: 60 });
-  } else if (c === 55 || c === 57) {
-    // Dense drizzle
-    setupPrecipitation('rain', { count: 120, dropLen: 0.15, dropW: 0.02, speed: 8, opacity: 0.4, spread: 55 });
-  } else if (c === 53) {
-    // Moderate drizzle
-    setupPrecipitation('rain', { count: 70, dropLen: 0.12, dropW: 0.015, speed: 6, opacity: 0.35, spread: 50 });
-  } else if (c === 51) {
-    // Light drizzle
-    setupPrecipitation('rain', { count: 35, dropLen: 0.1, dropW: 0.012, speed: 4, opacity: 0.3, spread: 45 });
-  } else if (c === 75 || c === 86) {
-    // Heavy snow
-    setupPrecipitation('snow', { count: 500, flakeSize: 0.12, speed: 2.5, opacity: 0.95, spread: 70 });
-  } else if (c === 73 || c === 85) {
-    // Moderate snow
-    setupPrecipitation('snow', { count: 250, flakeSize: 0.09, speed: 1.8, opacity: 0.85, spread: 60 });
-  } else if (c === 71) {
-    // Light snow
-    setupPrecipitation('snow', { count: 80, flakeSize: 0.06, speed: 1.0, opacity: 0.7, spread: 50 });
-  } else {
-    setupPrecipitation('none', null);
-  }
+  if (c >= 95)          setupPrecipitation('rain', { count: 800, dropLen: 0.5, dropW: 0.05, speed: 22, opacity: 0.8, spread: 70 });
+  else if (c === 65 || c === 82) setupPrecipitation('rain', { count: 600, dropLen: 0.45, dropW: 0.045, speed: 20, opacity: 0.7, spread: 70 });
+  else if (c === 63 || c === 81) setupPrecipitation('rain', { count: 350, dropLen: 0.35, dropW: 0.035, speed: 16, opacity: 0.6, spread: 65 });
+  else if (c === 61 || c === 80) setupPrecipitation('rain', { count: 180, dropLen: 0.25, dropW: 0.03, speed: 13, opacity: 0.5, spread: 60 });
+  else if (c === 55 || c === 57) setupPrecipitation('rain', { count: 120, dropLen: 0.15, dropW: 0.02, speed: 8, opacity: 0.4, spread: 55 });
+  else if (c === 53)             setupPrecipitation('rain', { count: 70, dropLen: 0.12, dropW: 0.015, speed: 6, opacity: 0.35, spread: 50 });
+  else if (c === 51)             setupPrecipitation('rain', { count: 35, dropLen: 0.1, dropW: 0.012, speed: 4, opacity: 0.3, spread: 45 });
+  else if (c === 75 || c === 86) setupPrecipitation('snow', { count: 500, flakeSize: 0.12, speed: 2.5, opacity: 0.95, spread: 70 });
+  else if (c === 73 || c === 85) setupPrecipitation('snow', { count: 250, flakeSize: 0.09, speed: 1.8, opacity: 0.85, spread: 60 });
+  else if (c === 71)             setupPrecipitation('snow', { count: 80, flakeSize: 0.06, speed: 1.0, opacity: 0.7, spread: 50 });
+  else                           setupPrecipitation('none', null);
 }
 applyWeather();
 
-// ── Weather panel controls ──
-const weatherLabels = { 0: '맑음', 2: '구름 조금', 3: '흐림', 45: '안개', 51: '이슬비', 53: '가랑비', 55: '보슬비', 61: '비', 63: '큰비', 65: '폭우', 71: '싸락눈', 73: '눈', 75: '폭설', 80: '소나기(약)', 81: '소나기', 82: '소나기(강)', 85: '눈보라(약)', 86: '눈보라', 95: '뇌우' };
+// ══════════════════════════════════════════════════════════════
+//  Weather panel controls
+// ══════════════════════════════════════════════════════════════
+const weatherLabels = { 0:'맑음',2:'구름 조금',3:'흐림',45:'안개',51:'이슬비',53:'가랑비',55:'보슬비',61:'비',63:'큰비',65:'폭우',71:'싸락눈',73:'눈',75:'폭설',80:'소나기(약)',81:'소나기',82:'소나기(강)',85:'눈보라(약)',86:'눈보라',95:'뇌우' };
 
 function setWeatherMode(mode) {
   weatherMode = mode;
@@ -350,9 +352,7 @@ function applyManualWeather() {
   const hour = parseInt(document.getElementById('sl-hour').value);
   const code = parseInt(document.getElementById('sel-weather').value);
   const wind = parseInt(document.getElementById('sl-wind').value);
-  weather.hour = hour;
-  weather.code = code;
-  weather.windSpeed = wind;
+  weather.hour = hour; weather.code = code; weather.windSpeed = wind;
   weather.isDay = hour >= 6 && hour < 20 ? 1 : 0;
   document.getElementById('v-hour').textContent = hour + 'h';
   document.getElementById('v-wind').textContent = wind;
@@ -361,65 +361,46 @@ function applyManualWeather() {
 
 function updateWeatherStatus() {
   const codeText = weatherLabels[weather.code] || `코드${weather.code}`;
-  document.getElementById('weather-status').textContent =
-    `${weather.temp}°C · ${codeText} · 풍속 ${weather.windSpeed}km/h`;
+  document.getElementById('weather-status').textContent = `${weather.temp}\u00B0C \u00B7 ${codeText} \u00B7 풍속 ${weather.windSpeed}km/h`;
 }
 
 document.getElementById('sl-hour').addEventListener('input', applyManualWeather);
 document.getElementById('sel-weather').addEventListener('change', applyManualWeather);
 document.getElementById('sl-wind').addEventListener('input', applyManualWeather);
 
-// ── Track path (flat, y=0) ──
+// ══════════════════════════════════════════════════════════════
+//  Track path
+// ══════════════════════════════════════════════════════════════
 const TRACK_WIDTH = 8;
 
 function createTrackPath() {
   const pts = [];
   const numEdges = 6;
   const baseR = 120;
-  const cornerRound = 0.18; // fraction of each edge used for rounding at each end
-
-  // Polygon corners with varied radius
+  const cornerRound = 0.18;
   const corners = [];
   for (let i = 0; i < numEdges; i++) {
     const angle = (i / numEdges) * Math.PI * 2;
     const r = baseR * (0.85 + Math.random() * 0.3);
     corners.push(new THREE.Vector3(r * Math.sin(angle), 0, r * Math.cos(angle)));
   }
-
   for (let i = 0; i < numEdges; i++) {
-    const curr = corners[i];
-    const next = corners[(i + 1) % numEdges];
-    const next2 = corners[(i + 2) % numEdges];
-
-    // ── Straight section: collinear points along middle 64% of edge ──
+    const curr = corners[i], next = corners[(i+1)%numEdges], next2 = corners[(i+2)%numEdges];
     const nStraight = 5;
     for (let j = 0; j <= nStraight; j++) {
-      const t = cornerRound + (1 - 2 * cornerRound) * j / nStraight;
-      pts.push(new THREE.Vector3(
-        curr.x + (next.x - curr.x) * t, 0,
-        curr.z + (next.z - curr.z) * t
-      ));
+      const t = cornerRound + (1 - 2*cornerRound) * j / nStraight;
+      pts.push(new THREE.Vector3(curr.x + (next.x-curr.x)*t, 0, curr.z + (next.z-curr.z)*t));
     }
-
-    // ── Corner arc: quadratic Bezier for smooth rounded corner ──
-    // Arc goes from (1-cornerRound) of this edge, through the corner vertex,
-    // to cornerRound of the next edge — tangent-continuous with both edges
-    const arcP0x = curr.x + (next.x - curr.x) * (1 - cornerRound);
-    const arcP0z = curr.z + (next.z - curr.z) * (1 - cornerRound);
-    const arcP2x = next.x + (next2.x - next.x) * cornerRound;
-    const arcP2z = next.z + (next2.z - next.z) * cornerRound;
-
+    const arcP0x = curr.x + (next.x-curr.x)*(1-cornerRound);
+    const arcP0z = curr.z + (next.z-curr.z)*(1-cornerRound);
+    const arcP2x = next.x + (next2.x-next.x)*cornerRound;
+    const arcP2z = next.z + (next2.z-next.z)*cornerRound;
     const nArc = 5;
     for (let j = 1; j <= nArc; j++) {
-      const t = j / (nArc + 1);
-      const t1 = 1 - t;
-      pts.push(new THREE.Vector3(
-        t1 * t1 * arcP0x + 2 * t1 * t * next.x + t * t * arcP2x, 0,
-        t1 * t1 * arcP0z + 2 * t1 * t * next.z + t * t * arcP2z
-      ));
+      const t = j / (nArc+1), t1 = 1-t;
+      pts.push(new THREE.Vector3(t1*t1*arcP0x + 2*t1*t*next.x + t*t*arcP2x, 0, t1*t1*arcP0z + 2*t1*t*next.z + t*t*arcP2z));
     }
   }
-
   return new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0.5);
 }
 
@@ -432,328 +413,215 @@ const ground = new THREE.Mesh(
   new THREE.MeshStandardMaterial({ color: 0x4a7c3f, roughness: 0.95 })
 );
 ground.rotation.x = -Math.PI / 2;
-ground.position.y = 0;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// ── Track surface (ribbon on ground) ──
+// ── Track surface ──
 function buildTrack() {
   const segs = 600;
   const pos = [], nrm = [], uv = [], idx = [];
-
   for (let i = 0; i <= segs; i++) {
     const t = i / segs;
     const p = trackPath.getPointAt(t);
     const tan = trackPath.getTangentAt(t).normalize();
-    const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0, 1, 0)).normalize();
+    const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0,1,0)).normalize();
     const hw = TRACK_WIDTH * 0.5;
-
-    pos.push(p.x - right.x * hw, 0.02, p.z - right.z * hw);
-    pos.push(p.x + right.x * hw, 0.02, p.z + right.z * hw);
-    nrm.push(0, 1, 0, 0, 1, 0);
-    uv.push(0, t * 60, 1, t * 60);
-
-    if (i < segs) {
-      const b = i * 2;
-      idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
-    }
+    pos.push(p.x - right.x*hw, 0.02, p.z - right.z*hw);
+    pos.push(p.x + right.x*hw, 0.02, p.z + right.z*hw);
+    nrm.push(0,1,0, 0,1,0);
+    uv.push(0, t*60, 1, t*60);
+    if (i < segs) { const b = i*2; idx.push(b, b+1, b+2, b+1, b+3, b+2); }
   }
-
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   geo.setIndex(idx);
-
   const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x444450, roughness: 0.8 }));
   mesh.receiveShadow = true;
   return mesh;
 }
 scene.add(buildTrack());
 
-// ── Track clearance check: is (x,z) too close to the track? ──
+// ── Track helpers ──
 const _trackSamples = [];
-for (let i = 0; i < 400; i++) {
-  const p = trackPath.getPointAt(i / 400);
-  _trackSamples.push(p.x, p.z);
-}
+for (let i = 0; i < 400; i++) { const p = trackPath.getPointAt(i/400); _trackSamples.push(p.x, p.z); }
 
 function isOnTrack(x, z, margin = 2) {
-  const limit = (TRACK_WIDTH * 0.5 + margin);
-  const limitSq = limit * limit;
+  const limitSq = (TRACK_WIDTH*0.5 + margin) ** 2;
   for (let i = 0; i < _trackSamples.length; i += 2) {
-    const dx = x - _trackSamples[i];
-    const dz = z - _trackSamples[i + 1];
-    if (dx * dx + dz * dz < limitSq) return true;
+    const dx = x - _trackSamples[i], dz = z - _trackSamples[i+1];
+    if (dx*dx + dz*dz < limitSq) return true;
   }
   return false;
 }
 
-// ── Helper: place object along track side ──
 function randomTrackSide(minDist, maxDist) {
   const t = Math.random();
   const p = trackPath.getPointAt(t);
   const tan = trackPath.getTangentAt(t).normalize();
-  const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0, 1, 0)).normalize();
+  const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0,1,0)).normalize();
   const side = Math.random() > 0.5 ? 1 : -1;
   const dist = minDist + Math.random() * (maxDist - minDist);
-  return {
-    x: p.x + right.x * side * dist,
-    z: p.z + right.z * side * dist,
-    angle: Math.atan2(tan.x, tan.z),
-  };
+  return { x: p.x + right.x*side*dist, z: p.z + right.z*side*dist, angle: Math.atan2(tan.x, tan.z) };
 }
 
-// ── Helper: find nearest track direction angle for a world position ──
 function nearestTrackAngle(x, z) {
   let minD = Infinity, bestI = 0;
   for (let i = 0; i < _trackSamples.length; i += 2) {
-    const dx = x - _trackSamples[i], dz = z - _trackSamples[i + 1];
-    const d = dx * dx + dz * dz;
-    if (d < minD) { minD = d; bestI = i / 2; }
+    const dx = x - _trackSamples[i], dz = z - _trackSamples[i+1];
+    const d = dx*dx + dz*dz;
+    if (d < minD) { minD = d; bestI = i/2; }
   }
-  const tan = trackPath.getTangentAt(bestI / (_trackSamples.length / 2));
+  const tan = trackPath.getTangentAt(bestI / (_trackSamples.length/2));
   return Math.atan2(tan.x, tan.z);
 }
 
-// ── Trees: varied colors, sizes, proportions ──
-function placeVegetation() {
-  const group = new THREE.Group();
+// ══════════════════════════════════════════════════════════════
+//  STATIC INSTANCED OBJECTS
+// ══════════════════════════════════════════════════════════════
 
-  // Trees — dark green
+// ── Vegetation ──
+{
+  // Trees (1500)
   const treeMat = new THREE.MeshStandardMaterial({ color: 0x1a6b1a, roughness: 0.85 });
-
-  // Trackside trees — tight wall right next to the track
+  const trees = [];
   for (let i = 0; i < 600; i++) {
-    const { x, z } = randomTrackSide(TRACK_WIDTH * 0.55 + 1, TRACK_WIDTH * 0.55 + 20);
+    const { x, z } = randomTrackSide(TRACK_WIDTH*0.55+1, TRACK_WIDTH*0.55+20);
     if (isOnTrack(x, z)) continue;
-    const mat = treeMat;
-    const h = 6 + Math.random() * 14;
-    const w = 2 + Math.random() * 4;
-    const d = 2 + Math.random() * 4;
-    const tree = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    tree.position.set(x, h / 2, z);
-    tree.rotation.y = Math.random() * Math.PI;
-    tree.castShadow = true;
-    tree.receiveShadow = true;
-    group.add(tree);
+    const h = 6+Math.random()*14, w = 2+Math.random()*4, d = 2+Math.random()*4;
+    trees.push({ x, y: h/2, z, sx: w, sy: h, sz: d, ry: Math.random()*Math.PI });
   }
-
-  // Mid-range trees — fill the space beyond trackside
   for (let i = 0; i < 400; i++) {
-    const { x, z } = randomTrackSide(TRACK_WIDTH * 0.55 + 15, TRACK_WIDTH * 0.55 + 50);
+    const { x, z } = randomTrackSide(TRACK_WIDTH*0.55+15, TRACK_WIDTH*0.55+50);
     if (isOnTrack(x, z)) continue;
-    const mat = treeMat;
-    const h = 10 + Math.random() * 14;
-    const w = 3 + Math.random() * 5;
-    const tree = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), mat);
-    tree.position.set(x, h / 2, z);
-    tree.castShadow = true;
-    group.add(tree);
+    const h = 10+Math.random()*14, w = 3+Math.random()*5;
+    trees.push({ x, y: h/2, z, sx: w, sy: h, sz: w, ry: Math.random()*Math.PI });
   }
-
-  // Area-fill trees — scattered around origin to fill gaps at curves
   for (let i = 0; i < 500; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const dist = 20 + Math.random() * 200;
-    const x = dist * Math.sin(angle);
-    const z = dist * Math.cos(angle);
+    const a = Math.random()*Math.PI*2, dist = 20+Math.random()*200;
+    const x = dist*Math.sin(a), z = dist*Math.cos(a);
     if (isOnTrack(x, z, 3)) continue;
-    const mat = treeMat;
-    const h = 8 + Math.random() * 16;
-    const w = 2 + Math.random() * 4;
-    const tree = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), mat);
-    tree.position.set(x, h / 2, z);
-    tree.castShadow = true;
-    group.add(tree);
+    const h = 8+Math.random()*16, w = 2+Math.random()*4;
+    trees.push({ x, y: h/2, z, sx: w, sy: h, sz: w, ry: Math.random()*Math.PI });
   }
+  addInst(inst(treeMat, trees, { shadow: true, recv: true }));
 
-  // ── Bushes: low, wide cubes — yellow-green ──
+  // Bushes (250)
   const bushMat = new THREE.MeshStandardMaterial({ color: 0x8db600, roughness: 0.9 });
-
+  const bushes = [];
   for (let i = 0; i < 250; i++) {
-    const { x, z } = randomTrackSide(TRACK_WIDTH * 0.55 + 0.5, TRACK_WIDTH * 0.55 + 15);
+    const { x, z } = randomTrackSide(TRACK_WIDTH*0.55+0.5, TRACK_WIDTH*0.55+15);
     if (isOnTrack(x, z, 1)) continue;
-    const mat = bushMat;
-    const h = 0.3 + Math.random() * 0.7;
-    const w = 0.5 + Math.random() * 1.5;
-    const d = 0.5 + Math.random() * 1.5;
-    const bush = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    bush.position.set(x, h / 2, z);
-    bush.rotation.y = Math.random() * Math.PI;
-    bush.castShadow = true;
-    bush.receiveShadow = true;
-    group.add(bush);
+    const h = 0.3+Math.random()*0.7, w = 0.5+Math.random()*1.5, d = 0.5+Math.random()*1.5;
+    bushes.push({ x, y: h/2, z, sx: w, sy: h, sz: d, ry: Math.random()*Math.PI });
   }
+  addInst(inst(bushMat, bushes, { recv: true }));
 
-  // ── Grass patches: very flat, scattered cubes — bright green ──
+  // Grass (300)
   const grassMat = new THREE.MeshStandardMaterial({ color: 0x4caf50, roughness: 0.95 });
-
+  const grasses = [];
   for (let i = 0; i < 300; i++) {
-    const { x, z } = randomTrackSide(TRACK_WIDTH * 0.55 + 0.3, TRACK_WIDTH * 0.55 + 30);
+    const { x, z } = randomTrackSide(TRACK_WIDTH*0.55+0.3, TRACK_WIDTH*0.55+30);
     if (isOnTrack(x, z, 0.5)) continue;
-    const mat = grassMat;
-    const h = 0.05 + Math.random() * 0.15;
-    const w = 0.8 + Math.random() * 3;
-    const d = 0.8 + Math.random() * 3;
-    const grass = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    grass.position.set(x, h / 2, z);
-    grass.rotation.y = Math.random() * Math.PI;
-    grass.receiveShadow = true;
-    group.add(grass);
+    const h = 0.05+Math.random()*0.15, w = 0.8+Math.random()*3, d = 0.8+Math.random()*3;
+    grasses.push({ x, y: h/2, z, sx: w, sy: h, sz: d, ry: Math.random()*Math.PI });
   }
+  addInst(inst(grassMat, grasses, { recv: true }));
 
-  // ── Tall grass / reeds: thin vertical cubes — olive ──
+  // Reeds (150)
   const reedMat = new THREE.MeshStandardMaterial({ color: 0xb8a038, roughness: 0.85 });
-
+  const reeds = [];
   for (let i = 0; i < 150; i++) {
-    const { x, z } = randomTrackSide(TRACK_WIDTH * 0.55 + 0.5, TRACK_WIDTH * 0.55 + 10);
+    const { x, z } = randomTrackSide(TRACK_WIDTH*0.55+0.5, TRACK_WIDTH*0.55+10);
     if (isOnTrack(x, z, 0.5)) continue;
-    const mat = reedMat;
-    const h = 0.4 + Math.random() * 0.8;
-    const w = 0.08 + Math.random() * 0.12;
-    const reed = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), mat);
-    reed.position.set(x, h / 2, z);
-    group.add(reed);
+    const h = 0.4+Math.random()*0.8, w = 0.08+Math.random()*0.12;
+    reeds.push({ x, y: h/2, z, sx: w, sy: h, sz: w });
   }
+  addInst(inst(reedMat, reeds));
 
-  // ── Rocks: small dark cubes scattered — gray ──
+  // Rocks (120)
   const rockMat = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.95 });
-
+  const rocks = [];
   for (let i = 0; i < 120; i++) {
-    const { x, z } = randomTrackSide(TRACK_WIDTH * 0.55 + 0.5, TRACK_WIDTH * 0.55 + 20);
+    const { x, z } = randomTrackSide(TRACK_WIDTH*0.55+0.5, TRACK_WIDTH*0.55+20);
     if (isOnTrack(x, z, 0.5)) continue;
-    const mat = rockMat;
-    const s = 0.15 + Math.random() * 0.5;
-    const h = s * (0.4 + Math.random() * 0.6);
-    const rock = new THREE.Mesh(new THREE.BoxGeometry(s, h, s * (0.8 + Math.random() * 0.4)), mat);
-    rock.position.set(x, h / 2, z);
-    rock.rotation.y = Math.random() * Math.PI;
-    rock.receiveShadow = true;
-    group.add(rock);
+    const s = 0.15+Math.random()*0.5, h = s*(0.4+Math.random()*0.6);
+    rocks.push({ x, y: h/2, z, sx: s, sy: h, sz: s*(0.8+Math.random()*0.4), ry: Math.random()*Math.PI });
   }
+  addInst(inst(rockMat, rocks, { recv: true }));
 
-  // ── Flowers: tiny colored cubes on ground — pink ──
+  // Flowers (200)
   const flowerMat = new THREE.MeshStandardMaterial({ color: 0xff4081, roughness: 0.6, emissive: 0xff4081, emissiveIntensity: 0.15 });
-
+  const flowers = [];
   for (let i = 0; i < 200; i++) {
-    const { x, z } = randomTrackSide(TRACK_WIDTH * 0.55 + 0.5, TRACK_WIDTH * 0.55 + 12);
+    const { x, z } = randomTrackSide(TRACK_WIDTH*0.55+0.5, TRACK_WIDTH*0.55+12);
     if (isOnTrack(x, z, 0.5)) continue;
-    const mat = flowerMat;
-    const s = 0.1 + Math.random() * 0.2;
-    const flower = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), mat);
-    flower.position.set(x, s / 2 + 0.05 + Math.random() * 0.15, z);
-    group.add(flower);
+    const s = 0.1+Math.random()*0.2;
+    flowers.push({ x, y: s/2+0.05+Math.random()*0.15, z, sx: s, sy: s, sz: s });
   }
-
-  return group;
+  addInst(inst(flowerMat, flowers));
 }
-scene.add(placeVegetation());
 
-// ── Buildings: dense, tall cubes to help block horizon ──
-function placeBuildings() {
-  // Buildings — beige/tan
-  const buildingMat = new THREE.MeshStandardMaterial({ color: 0xc4a882, roughness: 0.7 });
-  const group = new THREE.Group();
-
-  // Near buildings — close to track, aligned parallel to track
+// ── Buildings (instanced) ──
+{
+  const bldMat = new THREE.MeshStandardMaterial({ color: 0xc4a882, roughness: 0.7 });
+  const blds = [];
+  // Near
   for (let i = 0; i < 100; i++) {
-    const { x, z, angle } = randomTrackSide(TRACK_WIDTH * 0.55 + 6, TRACK_WIDTH * 0.55 + 30);
-    const scale = 0.5 + Math.random() * 1.0;
-    const w = scale * (4 + Math.random() * 4);
-    const d = scale * (8 + Math.random() * 10);
-    const h = scale * (10 + Math.random() * 18);
-    const halfW = w / 2, halfD = d / 2;
-    if (isOnTrack(x - halfW, z - halfD, 3) || isOnTrack(x + halfW, z - halfD, 3) ||
-        isOnTrack(x - halfW, z + halfD, 3) || isOnTrack(x + halfW, z + halfD, 3) ||
-        isOnTrack(x, z, 3)) continue;
-    const bld = new THREE.Mesh(
-      new THREE.BoxGeometry(w, h, d),
-      buildingMat
-    );
-    bld.position.set(x, h / 2, z);
-    bld.castShadow = true;
-    bld.receiveShadow = true;
-    bld.rotation.y = angle;
-    group.add(bld);
+    const { x, z, angle } = randomTrackSide(TRACK_WIDTH*0.55+6, TRACK_WIDTH*0.55+30);
+    const sc = 0.5+Math.random()*1.0;
+    const w = sc*(4+Math.random()*4), d = sc*(8+Math.random()*10), h = sc*(10+Math.random()*18);
+    const hw = w/2, hd = d/2;
+    if (isOnTrack(x-hw,z-hd,3)||isOnTrack(x+hw,z-hd,3)||isOnTrack(x-hw,z+hd,3)||isOnTrack(x+hw,z+hd,3)||isOnTrack(x,z,3)) continue;
+    blds.push({ x, y: h/2, z, sx: w, sy: h, sz: d, ry: angle });
   }
-
-  // Background buildings — tall wall further out, aligned to track
+  // Background
   for (let i = 0; i < 80; i++) {
-    const { x, z, angle } = randomTrackSide(TRACK_WIDTH * 0.55 + 25, TRACK_WIDTH * 0.55 + 70);
+    const { x, z, angle } = randomTrackSide(TRACK_WIDTH*0.55+25, TRACK_WIDTH*0.55+70);
     if (isOnTrack(x, z, 3)) continue;
-
-    const scale = 0.8 + Math.random() * 1.2;
-    const w = scale * (5 + Math.random() * 5);
-    const d = scale * (10 + Math.random() * 12);
-    const h = scale * (14 + Math.random() * 16);
-    const bld = new THREE.Mesh(
-      new THREE.BoxGeometry(w, h, d),
-      buildingMat
-    );
-    bld.position.set(x, h / 2, z);
-    bld.receiveShadow = true;
-    bld.rotation.y = angle;
-    group.add(bld);
+    const sc = 0.8+Math.random()*1.2;
+    const w = sc*(5+Math.random()*5), d = sc*(10+Math.random()*12), h = sc*(14+Math.random()*16);
+    blds.push({ x, y: h/2, z, sx: w, sy: h, sz: d, ry: angle });
   }
-
-  // Area-fill buildings — aligned to nearest track direction
+  // Area-fill
   for (let i = 0; i < 60; i++) {
-    const a = Math.random() * Math.PI * 2;
-    const dist = 30 + Math.random() * 190;
-    const x = dist * Math.sin(a);
-    const z = dist * Math.cos(a);
+    const a = Math.random()*Math.PI*2, dist = 30+Math.random()*190;
+    const x = dist*Math.sin(a), z = dist*Math.cos(a);
     if (isOnTrack(x, z, 5)) continue;
-
-    const scale = 0.6 + Math.random() * 1.1;
-    const w = scale * (4 + Math.random() * 5);
-    const d = scale * (8 + Math.random() * 12);
-    const h = scale * (12 + Math.random() * 16);
-    const bld = new THREE.Mesh(
-      new THREE.BoxGeometry(w, h, d),
-      buildingMat
-    );
-    bld.position.set(x, h / 2, z);
-    bld.receiveShadow = true;
-    bld.rotation.y = nearestTrackAngle(x, z);
-    group.add(bld);
+    const sc = 0.6+Math.random()*1.1;
+    const w = sc*(4+Math.random()*5), d = sc*(8+Math.random()*12), h = sc*(12+Math.random()*16);
+    blds.push({ x, y: h/2, z, sx: w, sy: h, sz: d, ry: nearestTrackAngle(x, z) });
   }
-
-  return group;
+  addInst(inst(bldMat, blds, { shadow: true, recv: true }));
 }
-scene.add(placeBuildings());
 
-// ── Street poles: evenly spaced along track for speed perception ──
-const lampPositions = []; // store all lamp world positions for PointLight pool
-function placeStreetPoles() {
-  const group = new THREE.Group();
+// ── Street poles + lamps (instanced) ──
+const lampPositions = [];
+{
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.6 });
+  const poles = [], lamps = [];
   const spacing = 15;
   const count = Math.floor(trackLength / spacing);
   for (let i = 0; i < count; i++) {
     const t = i / count;
     const p = trackPath.getPointAt(t);
     const tan = trackPath.getTangentAt(t).normalize();
-    const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0, 1, 0)).normalize();
+    const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0,1,0)).normalize();
     for (const side of [-1, 1]) {
-      const px = p.x + right.x * side * (TRACK_WIDTH * 0.5 + 1.5);
-      const pz = p.z + right.z * side * (TRACK_WIDTH * 0.5 + 1.5);
-      const pole = new THREE.Mesh(new THREE.BoxGeometry(0.15, 5, 0.15), poleMat);
-      pole.position.set(px, 2.5, pz);
-      pole.castShadow = true;
-      group.add(pole);
-      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.3), lampMat);
-      lamp.position.set(px, 5.1, pz);
-      group.add(lamp);
+      const px = p.x + right.x*side*(TRACK_WIDTH*0.5+1.5);
+      const pz = p.z + right.z*side*(TRACK_WIDTH*0.5+1.5);
+      poles.push({ x: px, y: 2.5, z: pz, sx: 0.15, sy: 5, sz: 0.15 });
+      lamps.push({ x: px, y: 5.1, z: pz, sx: 0.3, sy: 0.2, sz: 0.3 });
       lampPositions.push(new THREE.Vector3(px, 5.0, pz));
     }
   }
-  return group;
+  addInst(inst(poleMat, poles));
+  addInst(inst(lampMat, lamps));
 }
-scene.add(placeStreetPoles());
 
-// ── PointLight pool: follows nearest lamps to player ──
-const LAMP_LIGHT_COUNT = 8;
+// ── PointLight pool (reduced to 4) ──
+const LAMP_LIGHT_COUNT = 4;
 const lampLights = [];
 for (let i = 0; i < LAMP_LIGHT_COUNT; i++) {
   const pl = new THREE.PointLight(0xffeecc, 0, 12, 1.5);
@@ -761,327 +629,254 @@ for (let i = 0; i < LAMP_LIGHT_COUNT; i++) {
   lampLights.push(pl);
 }
 
-// ── Arches/gates: span across track at intervals ──
-function placeArches() {
-  const group = new THREE.Group();
+// ── Arches (instanced) ──
+{
   const archMat = new THREE.MeshStandardMaterial({ color: 0xdd4444, roughness: 0.5 });
+  const pillars = [], beams = [];
   const spacing = 80;
   const count = Math.floor(trackLength / spacing);
   for (let i = 0; i < count; i++) {
     const t = i / count;
     const p = trackPath.getPointAt(t);
     const tan = trackPath.getTangentAt(t).normalize();
-    const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0, 1, 0)).normalize();
+    const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0,1,0)).normalize();
     const angle = Math.atan2(tan.x, tan.z);
-    const hw = TRACK_WIDTH * 0.5 + 1;
+    const hw = TRACK_WIDTH*0.5+1;
     const archH = 4.5;
-    // Left pillar
-    const lp = new THREE.Mesh(new THREE.BoxGeometry(0.4, archH, 0.4), archMat);
-    lp.position.set(p.x - right.x * hw, archH / 2, p.z - right.z * hw);
-    lp.rotation.y = angle;
-    group.add(lp);
-    // Right pillar
-    const rp = new THREE.Mesh(new THREE.BoxGeometry(0.4, archH, 0.4), archMat);
-    rp.position.set(p.x + right.x * hw, archH / 2, p.z + right.z * hw);
-    rp.rotation.y = angle;
-    group.add(rp);
-    // Top beam
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(TRACK_WIDTH + 2, 0.5, 0.6), archMat);
-    beam.position.set(p.x, archH + 0.25, p.z);
-    beam.rotation.y = angle;
-    group.add(beam);
+    pillars.push({ x: p.x - right.x*hw, y: archH/2, z: p.z - right.z*hw, sx: 0.4, sy: archH, sz: 0.4, ry: angle });
+    pillars.push({ x: p.x + right.x*hw, y: archH/2, z: p.z + right.z*hw, sx: 0.4, sy: archH, sz: 0.4, ry: angle });
+    beams.push({ x: p.x, y: archH+0.25, z: p.z, sx: TRACK_WIDTH+2, sy: 0.5, sz: 0.6, ry: angle });
   }
-  return group;
+  addInst(inst(archMat, pillars));
+  addInst(inst(archMat, beams));
 }
-scene.add(placeArches());
 
-// ── Spectators: small people cubes along the track ──
-function placeSpectators() {
-  const group = new THREE.Group();
+// ── Spectators (instanced with instanceColor) ──
+{
   const specColors = [0x3366cc, 0xcc3333, 0xffcc00, 0x33aa55, 0xffffff, 0xff6699, 0x8844bb];
-  const specMats = specColors.map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.6 }));
+  const specMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
+  const specs = [], colors = [];
   const clusters = 30;
   for (let c = 0; c < clusters; c++) {
     const t = Math.random();
     const p = trackPath.getPointAt(t);
     const tan = trackPath.getTangentAt(t).normalize();
-    const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0, 1, 0)).normalize();
+    const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0,1,0)).normalize();
     const side = Math.random() > 0.5 ? 1 : -1;
-    const groupDist = TRACK_WIDTH * 0.5 + 2 + Math.random() * 2;
-    const clusterSize = 3 + Math.floor(Math.random() * 6);
+    const groupDist = TRACK_WIDTH*0.5+2+Math.random()*2;
+    const clusterSize = 3+Math.floor(Math.random()*6);
     for (let j = 0; j < clusterSize; j++) {
-      const offset = (j - clusterSize / 2) * 0.7;
-      const sx = p.x + right.x * side * groupDist + tan.x * offset;
-      const sz = p.z + right.z * side * groupDist + tan.z * offset;
-      const h = 1.2 + Math.random() * 0.5;
-      const spec = new THREE.Mesh(
-        new THREE.BoxGeometry(0.35, h, 0.25),
-        specMats[Math.floor(Math.random() * specMats.length)]
-      );
-      spec.position.set(sx, h / 2, sz);
-      spec.lookAt(p.x, h / 2, p.z);
-      group.add(spec);
+      const offset = (j - clusterSize/2)*0.7;
+      const sx = p.x + right.x*side*groupDist + tan.x*offset;
+      const sz = p.z + right.z*side*groupDist + tan.z*offset;
+      const h = 1.2+Math.random()*0.5;
+      const ry = Math.atan2(p.x - sx, p.z - sz);
+      specs.push({ x: sx, y: h/2, z: sz, sx: 0.35, sy: h, sz: 0.25, ry });
+      colors.push(specColors[Math.floor(Math.random()*specColors.length)]);
     }
   }
-  return group;
+  if (specs.length) {
+    const m = inst(specMat, specs);
+    for (let i = 0; i < colors.length; i++) { _c.setHex(colors[i]); m.setColorAt(i, _c); }
+    m.instanceColor.needsUpdate = true;
+    addInst(m);
+  }
 }
-scene.add(placeSpectators());
 
-// ── Fences/guardrails: low barriers along track edges ──
-function placeFences() {
-  const group = new THREE.Group();
+// ── Fences (instanced) ──
+{
   const fenceMat = new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.5 });
-  const segLen = 3;
+  const fences = [];
+  const segLen = 3, fenceH = 0.7;
   const count = Math.floor(trackLength / segLen);
-  const fenceH = 0.7;
   for (let i = 0; i < count; i++) {
     const t = i / count;
     const p = trackPath.getPointAt(t);
     const tan = trackPath.getTangentAt(t).normalize();
-    const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0, 1, 0)).normalize();
+    const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0,1,0)).normalize();
     const angle = Math.atan2(tan.x, tan.z);
     for (const side of [-1, 1]) {
-      const fx = p.x + right.x * side * (TRACK_WIDTH * 0.5 + 0.3);
-      const fz = p.z + right.z * side * (TRACK_WIDTH * 0.5 + 0.3);
-      const fence = new THREE.Mesh(new THREE.BoxGeometry(0.08, fenceH, segLen), fenceMat);
-      fence.position.set(fx, fenceH / 2, fz);
-      fence.rotation.y = angle;
-      fence.receiveShadow = true;
-      group.add(fence);
+      const fx = p.x + right.x*side*(TRACK_WIDTH*0.5+0.3);
+      const fz = p.z + right.z*side*(TRACK_WIDTH*0.5+0.3);
+      fences.push({ x: fx, y: fenceH/2, z: fz, sx: 0.08, sy: fenceH, sz: segLen, ry: angle });
     }
   }
-  return group;
+  addInst(inst(fenceMat, fences, { recv: true }));
 }
-scene.add(placeFences());
 
-// ── Water/ponds: flat blue surfaces with backdrop trees+buildings ──
-function placePonds() {
-  const group = new THREE.Group();
+// ── Ponds (instanced) ──
+{
   const waterMat = new THREE.MeshStandardMaterial({ color: 0x2288bb, roughness: 0.2, metalness: 0.3 });
-  const backdropTreeMat = new THREE.MeshStandardMaterial({ color: 0x1a6b1a, roughness: 0.85 });
-  const backdropBldMat = new THREE.MeshStandardMaterial({ color: 0xc4a882, roughness: 0.7 });
-  const pondCount = 6;
-  for (let i = 0; i < pondCount; i++) {
-    const t = i / pondCount + Math.random() * 0.05;
-    const p = trackPath.getPointAt(t % 1);
-    const tan = trackPath.getTangentAt(t % 1).normalize();
-    const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0, 1, 0)).normalize();
-    const side = Math.random() > 0.5 ? 1 : -1;
-    const dist = TRACK_WIDTH * 0.5 + 20 + Math.random() * 25;
-    const cx = p.x + right.x * side * dist;
-    const cz = p.z + right.z * side * dist;
-    const pw = 12 + Math.random() * 20;
-    const pd = 8 + Math.random() * 14;
-    const water = new THREE.Mesh(new THREE.BoxGeometry(pw, 0.05, pd), waterMat);
-    water.position.set(cx, 0.02, cz);
-    water.rotation.y = Math.atan2(tan.x, tan.z);
-    group.add(water);
-    // Backdrop: dense trees+buildings behind the pond (away from track)
-    const backDir = side;
-    for (let j = 0; j < 8; j++) {
-      const bx = cx + right.x * backDir * (pw * 0.4 + 2 + Math.random() * 6) + tan.x * (Math.random() - 0.5) * pd;
-      const bz = cz + right.z * backDir * (pw * 0.4 + 2 + Math.random() * 6) + tan.z * (Math.random() - 0.5) * pd;
-      const bh = 10 + Math.random() * 18;
-      const bw = 2 + Math.random() * 4;
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bw), j < 5 ? backdropTreeMat : backdropBldMat);
-      mesh.position.set(bx, bh / 2, bz);
-      group.add(mesh);
-    }
-  }
-  return group;
-}
-scene.add(placePonds());
-
-// ── Tunnel: enclosed section of track ──
-function placeTunnel() {
-  const group = new THREE.Group();
-  const tunnelMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.8 });
-  const tunnelLen = 25;
-  const tunnelT = 0.4;
-  const segs = 20;
-  const hw = TRACK_WIDTH * 0.5 + 1.5;
-  const wallH = 5;
-  for (let i = 0; i <= segs; i++) {
-    const t = (tunnelT + (i / segs) * (tunnelLen / trackLength)) % 1;
+  const treeMat2 = new THREE.MeshStandardMaterial({ color: 0x1a6b1a, roughness: 0.85 });
+  const bldMat2 = new THREE.MeshStandardMaterial({ color: 0xc4a882, roughness: 0.7 });
+  const waters = [], bdTrees = [], bdBlds = [];
+  for (let i = 0; i < 6; i++) {
+    const t = (i/6 + Math.random()*0.05) % 1;
     const p = trackPath.getPointAt(t);
     const tan = trackPath.getTangentAt(t).normalize();
-    const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0, 1, 0)).normalize();
+    const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0,1,0)).normalize();
+    const side = Math.random() > 0.5 ? 1 : -1;
+    const dist = TRACK_WIDTH*0.5+20+Math.random()*25;
+    const cx = p.x + right.x*side*dist, cz = p.z + right.z*side*dist;
+    const pw = 12+Math.random()*20, pd = 8+Math.random()*14;
+    const angle = Math.atan2(tan.x, tan.z);
+    waters.push({ x: cx, y: 0.02, z: cz, sx: pw, sy: 0.05, sz: pd, ry: angle });
+    for (let j = 0; j < 8; j++) {
+      const bx = cx + right.x*side*(pw*0.4+2+Math.random()*6) + tan.x*(Math.random()-0.5)*pd;
+      const bz = cz + right.z*side*(pw*0.4+2+Math.random()*6) + tan.z*(Math.random()-0.5)*pd;
+      const bh = 10+Math.random()*18, bw = 2+Math.random()*4;
+      if (j < 5) bdTrees.push({ x: bx, y: bh/2, z: bz, sx: bw, sy: bh, sz: bw });
+      else bdBlds.push({ x: bx, y: bh/2, z: bz, sx: bw, sy: bh, sz: bw });
+    }
+  }
+  addInst(inst(waterMat, waters));
+  addInst(inst(treeMat2, bdTrees));
+  addInst(inst(bldMat2, bdBlds));
+}
+
+// ── Tunnel (instanced) ──
+{
+  const tunnelMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.8 });
+  const walls = [], ceils = [];
+  const tunnelLen = 25, tunnelT = 0.4, segs = 20;
+  const hw = TRACK_WIDTH*0.5+1.5, wallH = 5;
+  for (let i = 0; i <= segs; i++) {
+    const t = (tunnelT + (i/segs)*(tunnelLen/trackLength)) % 1;
+    const p = trackPath.getPointAt(t);
+    const tan = trackPath.getTangentAt(t).normalize();
+    const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0,1,0)).normalize();
     const angle = Math.atan2(tan.x, tan.z);
     const segL = tunnelLen / segs * 1.1;
-    // Left wall
-    const lw = new THREE.Mesh(new THREE.BoxGeometry(0.6, wallH, segL), tunnelMat);
-    lw.position.set(p.x - right.x * hw, wallH / 2, p.z - right.z * hw);
-    lw.rotation.y = angle;
-    lw.receiveShadow = true;
-    group.add(lw);
-    // Right wall
-    const rw = new THREE.Mesh(new THREE.BoxGeometry(0.6, wallH, segL), tunnelMat);
-    rw.position.set(p.x + right.x * hw, wallH / 2, p.z + right.z * hw);
-    rw.rotation.y = angle;
-    rw.receiveShadow = true;
-    group.add(rw);
-    // Ceiling
-    const ceil = new THREE.Mesh(new THREE.BoxGeometry(TRACK_WIDTH + 3, 0.4, segL), tunnelMat);
-    ceil.position.set(p.x, wallH, p.z);
-    ceil.rotation.y = angle;
-    ceil.receiveShadow = true;
-    group.add(ceil);
+    walls.push({ x: p.x - right.x*hw, y: wallH/2, z: p.z - right.z*hw, sx: 0.6, sy: wallH, sz: segL, ry: angle });
+    walls.push({ x: p.x + right.x*hw, y: wallH/2, z: p.z + right.z*hw, sx: 0.6, sy: wallH, sz: segL, ry: angle });
+    ceils.push({ x: p.x, y: wallH, z: p.z, sx: TRACK_WIDTH+3, sy: 0.4, sz: segL, ry: angle });
   }
-  return group;
+  addInst(inst(tunnelMat, walls, { recv: true }));
+  addInst(inst(tunnelMat, ceils, { recv: true }));
 }
-scene.add(placeTunnel());
 
-// ── Clouds: large flat cubes drifting in the sky ──
-const clouds = [];
-function placeClouds() {
-  const group = new THREE.Group();
-  const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.85 });
-  for (let i = 0; i < 25; i++) {
-    const cw = 15 + Math.random() * 30;
-    const cd = 8 + Math.random() * 15;
-    const ch = 2 + Math.random() * 3;
-    const cloud = new THREE.Mesh(new THREE.BoxGeometry(cw, ch, cd), cloudMat);
-    const cx = (Math.random() - 0.5) * 400;
-    const cz = (Math.random() - 0.5) * 400;
-    const cy = 60 + Math.random() * 40;
-    cloud.position.set(cx, cy, cz);
-    cloud.rotation.y = Math.random() * Math.PI;
-    group.add(cloud);
-    clouds.push({ mesh: cloud, speed: 0.5 + Math.random() * 1.5, dir: Math.random() * Math.PI * 2 });
-  }
-  return group;
-}
-scene.add(placeClouds());
-
-// ── Birds: small cubes flying in flocks ──
-const birds = [];
-function placeBirds() {
-  const group = new THREE.Group();
-  const birdMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.5 });
-  const flocks = 8;
-  for (let f = 0; f < flocks; f++) {
-    const cx = (Math.random() - 0.5) * 250;
-    const cz = (Math.random() - 0.5) * 250;
-    const cy = 15 + Math.random() * 30;
-    const dir = Math.random() * Math.PI * 2;
-    const speed = 3 + Math.random() * 5;
-    const count = 3 + Math.floor(Math.random() * 5);
-    for (let b = 0; b < count; b++) {
-      const bird = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.15), birdMat);
-      const ox = (Math.random() - 0.5) * 3;
-      const oz = (Math.random() - 0.5) * 3;
-      const oy = (Math.random() - 0.5) * 1.5;
-      bird.position.set(cx + ox, cy + oy, cz + oz);
-      group.add(bird);
-      birds.push({ mesh: bird, cx, cz, cy, ox, oz, oy, dir, speed, phase: Math.random() * Math.PI * 2 });
-    }
-  }
-  return group;
-}
-scene.add(placeBirds());
-
-// ── Ground animals: small cubes near track ──
-function placeAnimals() {
-  const group = new THREE.Group();
+// ── Animals (instanced with instanceColor) ──
+{
   const animalColors = [0x8B4513, 0xa0522d, 0x666666, 0xf5f5dc];
-  const animalMats = animalColors.map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.7 }));
+  const animalMat = new THREE.MeshStandardMaterial({ roughness: 0.7 });
+  const animals = [], colors = [];
   for (let i = 0; i < 20; i++) {
-    const { x, z } = randomTrackSide(TRACK_WIDTH * 0.55 + 3, TRACK_WIDTH * 0.55 + 25);
+    const { x, z } = randomTrackSide(TRACK_WIDTH*0.55+3, TRACK_WIDTH*0.55+25);
     if (isOnTrack(x, z, 2)) continue;
-    const mat = animalMats[Math.floor(Math.random() * animalMats.length)];
-    const bodyW = 0.3 + Math.random() * 0.3;
-    const bodyH = 0.2 + Math.random() * 0.2;
-    const bodyD = 0.5 + Math.random() * 0.4;
-    const animal = new THREE.Mesh(new THREE.BoxGeometry(bodyW, bodyH, bodyD), mat);
-    animal.position.set(x, bodyH / 2 + 0.01, z);
-    animal.rotation.y = Math.random() * Math.PI * 2;
-    animal.castShadow = true;
-    group.add(animal);
+    const bw = 0.3+Math.random()*0.3, bh = 0.2+Math.random()*0.2, bd = 0.5+Math.random()*0.4;
+    animals.push({ x, y: bh/2+0.01, z, sx: bw, sy: bh, sz: bd, ry: Math.random()*Math.PI*2 });
+    colors.push(animalColors[Math.floor(Math.random()*animalColors.length)]);
   }
-  return group;
+  if (animals.length) {
+    const m = inst(animalMat, animals);
+    for (let i = 0; i < colors.length; i++) { _c.setHex(colors[i]); m.setColorAt(i, _c); }
+    m.instanceColor.needsUpdate = true;
+    addInst(m);
+  }
 }
-scene.add(placeAnimals());
 
-// ── Benches & trash cans: street furniture along track ──
-function placeStreetFurniture() {
-  const group = new THREE.Group();
+// ── Benches + trash cans (instanced) ──
+{
   const benchMat = new THREE.MeshStandardMaterial({ color: 0x8B5E3C, roughness: 0.8 });
   const trashMat = new THREE.MeshStandardMaterial({ color: 0x2e7d32, roughness: 0.6 });
-  // Benches
-  for (let i = 0; i < 30; i++) {
-    const { x, z, angle } = randomTrackSide(TRACK_WIDTH * 0.55 + 1.5, TRACK_WIDTH * 0.55 + 4);
-    if (isOnTrack(x, z, 1)) continue;
-    const bench = new THREE.Group();
-    // Seat
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.08, 0.4), benchMat);
-    seat.position.y = 0.45;
-    bench.add(seat);
-    // Back rest
-    const back = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.4, 0.06), benchMat);
-    back.position.set(0, 0.65, -0.17);
-    bench.add(back);
-    // Legs
-    for (const lx of [-0.5, 0.5]) {
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.45, 0.35), benchMat);
-      leg.position.set(lx, 0.225, 0);
-      bench.add(leg);
-    }
-    bench.position.set(x, 0, z);
-    bench.rotation.y = angle;
-    bench.castShadow = true;
-    group.add(bench);
-  }
-  // Trash cans
-  for (let i = 0; i < 20; i++) {
-    const { x, z } = randomTrackSide(TRACK_WIDTH * 0.55 + 1.5, TRACK_WIDTH * 0.55 + 3);
-    if (isOnTrack(x, z, 1)) continue;
-    const can = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.7, 0.35), trashMat);
-    can.position.set(x, 0.35, z);
-    can.castShadow = true;
-    group.add(can);
-    // Lid
-    const lid = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.05, 0.4), trashMat);
-    lid.position.set(x, 0.72, z);
-    group.add(lid);
-  }
-  return group;
-}
-scene.add(placeStreetFurniture());
 
-// ── Particles: floating leaves, dust, pollen ──
-const particles = [];
-function createParticles() {
-  const group = new THREE.Group();
+  // Benches — simplified to single box per bench for perf
+  const benches = [];
+  for (let i = 0; i < 30; i++) {
+    const { x, z, angle } = randomTrackSide(TRACK_WIDTH*0.55+1.5, TRACK_WIDTH*0.55+4);
+    if (isOnTrack(x, z, 1)) continue;
+    benches.push({ x, y: 0.35, z, sx: 1.2, sy: 0.7, sz: 0.4, ry: angle });
+  }
+  addInst(inst(benchMat, benches));
+
+  // Trash cans
+  const cans = [];
+  for (let i = 0; i < 20; i++) {
+    const { x, z } = randomTrackSide(TRACK_WIDTH*0.55+1.5, TRACK_WIDTH*0.55+3);
+    if (isOnTrack(x, z, 1)) continue;
+    cans.push({ x, y: 0.375, z, sx: 0.35, sy: 0.75, sz: 0.35 });
+  }
+  addInst(inst(trashMat, cans));
+}
+
+// ══════════════════════════════════════════════════════════════
+//  ANIMATED INSTANCED OBJECTS
+// ══════════════════════════════════════════════════════════════
+
+// ── Clouds ──
+const cloudData = [];
+let cloudMesh;
+{
+  const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.85 });
+  const transforms = [];
+  for (let i = 0; i < 25; i++) {
+    const cw = 15+Math.random()*30, cd = 8+Math.random()*15, ch = 2+Math.random()*3;
+    const cx = (Math.random()-0.5)*400, cz = (Math.random()-0.5)*400, cy = 60+Math.random()*40;
+    transforms.push({ x: cx, y: cy, z: cz, sx: cw, sy: ch, sz: cd, ry: Math.random()*Math.PI });
+    cloudData.push({ x: cx, y: cy, z: cz, speed: 0.5+Math.random()*1.5, dir: Math.random()*Math.PI*2 });
+  }
+  cloudMesh = inst(cloudMat, transforms, { noCull: true });
+  if (cloudMesh) scene.add(cloudMesh);
+}
+
+// ── Birds ──
+const birdData = [];
+let birdMesh;
+{
+  const birdMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.5 });
+  const transforms = [];
+  const flocks = 8;
+  for (let f = 0; f < flocks; f++) {
+    const cx = (Math.random()-0.5)*250, cz = (Math.random()-0.5)*250, cy = 15+Math.random()*30;
+    const dir = Math.random()*Math.PI*2, speed = 3+Math.random()*5;
+    const cnt = 3+Math.floor(Math.random()*5);
+    for (let b = 0; b < cnt; b++) {
+      const ox = (Math.random()-0.5)*3, oz = (Math.random()-0.5)*3, oy = (Math.random()-0.5)*1.5;
+      transforms.push({ x: cx+ox, y: cy+oy, z: cz+oz, sx: 0.3, sy: 0.1, sz: 0.15 });
+      birdData.push({ cx, cz, cy, ox, oz, oy, dir, speed, phase: Math.random()*Math.PI*2 });
+    }
+  }
+  birdMesh = inst(birdMat, transforms, { noCull: true });
+  if (birdMesh) scene.add(birdMesh);
+}
+
+// ── Particles (3 types, in a group that follows player) ──
+const particleGroup = new THREE.Group();
+scene.add(particleGroup);
+const particleData = []; // { type, idx, offsetX/Y/Z, driftSpeed, bobSpeed, bobAmp, spinSpeed, phase }
+const particleMeshes = []; // [leafMesh, dustMesh, pollenMesh]
+{
   const leafMat = new THREE.MeshStandardMaterial({ color: 0x88aa44, roughness: 0.8 });
   const dustMat = new THREE.MeshStandardMaterial({ color: 0xddccaa, transparent: true, opacity: 0.5 });
   const pollenMat = new THREE.MeshStandardMaterial({ color: 0xffffaa, transparent: true, opacity: 0.6, emissive: 0xffffaa, emissiveIntensity: 0.2 });
   const mats = [leafMat, dustMat, pollenMat];
   const sizes = [0.08, 0.04, 0.03];
+  const groups = [[], [], []]; // transforms per type
+
   for (let i = 0; i < 120; i++) {
-    const type = Math.floor(Math.random() * 3);
-    const s = sizes[type] + Math.random() * sizes[type];
-    const p = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.3, s), mats[type]);
-    const rx = (Math.random() - 0.5) * 50;
-    const ry = 0.3 + Math.random() * 5;
-    const rz = (Math.random() - 0.5) * 50;
-    p.position.set(rx, ry, rz);
-    group.add(p);
-    particles.push({
-      mesh: p,
+    const type = Math.floor(Math.random()*3);
+    const s = sizes[type]+Math.random()*sizes[type];
+    const rx = (Math.random()-0.5)*50, ry = 0.3+Math.random()*5, rz = (Math.random()-0.5)*50;
+    groups[type].push({ x: rx, y: ry, z: rz, sx: s, sy: s*0.3, sz: s });
+    particleData.push({
+      type, idx: groups[type].length - 1,
       offsetX: rx, offsetY: ry, offsetZ: rz,
-      driftSpeed: 0.3 + Math.random() * 0.8,
-      bobSpeed: 1 + Math.random() * 2,
-      bobAmp: 0.1 + Math.random() * 0.3,
-      spinSpeed: 1 + Math.random() * 3,
-      phase: Math.random() * Math.PI * 2,
+      driftSpeed: 0.3+Math.random()*0.8,
+      bobSpeed: 1+Math.random()*2, bobAmp: 0.1+Math.random()*0.3,
+      spinSpeed: 1+Math.random()*3, phase: Math.random()*Math.PI*2,
     });
   }
-  return group;
-}
-const particleGroup = createParticles();
-scene.add(particleGroup);
 
-// ── Player runner: single cube ──
+  for (let t = 0; t < 3; t++) {
+    const m = inst(mats[t], groups[t], { noCull: true });
+    if (m) particleGroup.add(m);
+    particleMeshes.push(m);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Player + AI runners (individual meshes — only 13 total)
+// ══════════════════════════════════════════════════════════════
 const player = new THREE.Mesh(
   new THREE.BoxGeometry(0.5, 1.6, 0.4),
   new THREE.MeshStandardMaterial({ color: 0xff6633, roughness: 0.5 })
@@ -1089,14 +884,8 @@ const player = new THREE.Mesh(
 player.castShadow = true;
 scene.add(player);
 
-// ── AI runners: single cubes ──
-const aiColors = [
-  0x4CAF50, 0x2196F3, 0x9C27B0, 0xF44336, 0xFF9800,
-  0x00BCD4, 0xE91E63, 0x3F51B5, 0xCDDC39, 0x795548,
-  0x607D8B, 0xFFEB3B
-];
+const aiColors = [0x4CAF50,0x2196F3,0x9C27B0,0xF44336,0xFF9800,0x00BCD4,0xE91E63,0x3F51B5,0xCDDC39,0x795548,0x607D8B,0xFFEB3B];
 const aiRunners = [];
-
 for (let i = 0; i < 12; i++) {
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(0.5, 1.6, 0.4),
@@ -1104,31 +893,27 @@ for (let i = 0; i < 12; i++) {
   );
   mesh.castShadow = true;
   scene.add(mesh);
-
   aiRunners.push({
-    mesh,
-    t: Math.random(),
-    baseSpeed: 5 + Math.random() * 12,
-    speedVar: 0.5 + Math.random() * 2,
-    varFreq: 0.1 + Math.random() * 0.3,
-    lane: (Math.random() - 0.5) * TRACK_WIDTH * 0.6,
-    phase: Math.random() * Math.PI * 2,
+    mesh, t: Math.random(),
+    baseSpeed: 5+Math.random()*12, speedVar: 0.5+Math.random()*2,
+    varFreq: 0.1+Math.random()*0.3, lane: (Math.random()-0.5)*TRACK_WIDTH*0.6,
+    phase: Math.random()*Math.PI*2,
   });
 }
 
 // ── State ──
 let playerT = 0;
-const PLAYER_SPEED = 12; // km/h constant
+const PLAYER_SPEED = 12;
 
 // ── Camera ──
-const CAM_DIST = 4.5;
-const CAM_HEIGHT = 2.0;
-const CAM_LERP = 0.045;
+const CAM_DIST = 4.5, CAM_HEIGHT = 2.0, CAM_LERP = 0.045;
 const camPos = new THREE.Vector3();
 const camTgt = new THREE.Vector3();
 let camReady = false;
 
-// ── Animation loop ──
+// ══════════════════════════════════════════════════════════════
+//  Animate loop
+// ══════════════════════════════════════════════════════════════
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -1141,12 +926,10 @@ function animate() {
   const pp = trackPath.getPointAt(playerT);
   const pt = trackPath.getTangentAt(playerT).normalize();
 
-  // Shared look-ahead direction (used by player facing + camera position)
   const lookAheadT = (playerT + 20 / trackLength) % 1;
   const lookPt = trackPath.getPointAt(lookAheadT);
   const lookDir = new THREE.Vector3(lookPt.x - pp.x, 0, lookPt.z - pp.z).normalize();
 
-  // Runner height: center at 0.8 (half of 1.6), plus running bob
   const bob = Math.abs(Math.sin(time * 9)) * 0.06;
   player.position.set(pp.x, 0.8 + bob, pp.z);
   player.lookAt(pp.x + lookDir.x, 0.8, pp.z + lookDir.z);
@@ -1155,37 +938,22 @@ function animate() {
   for (const ai of aiRunners) {
     const spd = ai.baseSpeed + Math.sin(time * ai.varFreq + ai.phase) * ai.speedVar;
     ai.t = (ai.t + Math.max(0, spd) / 3.6 * dt / trackLength) % 1;
-
     const ap = trackPath.getPointAt(ai.t);
     const aiLookT = (ai.t + 20 / trackLength) % 1;
     const aiLookPt = trackPath.getPointAt(aiLookT);
     const aiLookDir = new THREE.Vector3(aiLookPt.x - ap.x, 0, aiLookPt.z - ap.z).normalize();
-    const right = new THREE.Vector3().crossVectors(aiLookDir, new THREE.Vector3(0, 1, 0)).normalize();
-
+    const right = new THREE.Vector3().crossVectors(aiLookDir, new THREE.Vector3(0,1,0)).normalize();
     const aiBob = Math.abs(Math.sin(time * 8 + ai.phase)) * 0.06;
-    const aiX = ap.x + right.x * ai.lane;
-    const aiZ = ap.z + right.z * ai.lane;
+    const aiX = ap.x + right.x * ai.lane, aiZ = ap.z + right.z * ai.lane;
     ai.mesh.position.set(aiX, 0.8 + aiBob, aiZ);
     ai.mesh.lookAt(aiX + aiLookDir.x, 0.8, aiZ + aiLookDir.z);
   }
 
-  // Camera: position behind runner using same look-ahead direction
-  const desPos = new THREE.Vector3(
-    pp.x - lookDir.x * CAM_DIST,
-    CAM_HEIGHT,
-    pp.z - lookDir.z * CAM_DIST
-  );
+  // Camera
+  const desPos = new THREE.Vector3(pp.x - lookDir.x*CAM_DIST, CAM_HEIGHT, pp.z - lookDir.z*CAM_DIST);
   const desTgt = new THREE.Vector3(pp.x, 0.9, pp.z);
-
-  if (!camReady) {
-    camPos.copy(desPos);
-    camTgt.copy(desTgt);
-    camReady = true;
-  } else {
-    camPos.lerp(desPos, CAM_LERP);
-    camTgt.lerp(desTgt, CAM_LERP);
-  }
-
+  if (!camReady) { camPos.copy(desPos); camTgt.copy(desTgt); camReady = true; }
+  else { camPos.lerp(desPos, CAM_LERP); camTgt.lerp(desTgt, CAM_LERP); }
   camera.position.copy(camPos);
   camera.lookAt(camTgt);
 
@@ -1193,96 +961,143 @@ function animate() {
   sun.position.set(pp.x + 80, 100, pp.z + 60);
   sun.target.position.copy(pp);
 
-  // Lamp PointLights: snap to nearest lamp positions
+  // Lamp PointLights: find nearest without allocating arrays
   if (lampLightIntensity > 0 && lampPositions.length > 0) {
-    // Find closest lamps to player
-    const dists = lampPositions.map((lp, i) => ({ i, d: (lp.x - pp.x) ** 2 + (lp.z - pp.z) ** 2 }));
-    dists.sort((a, b) => a.d - b.d);
+    const nearest = [Infinity, Infinity, Infinity, Infinity];
+    const nearestIdx = [0, 0, 0, 0];
+    for (let i = 0; i < lampPositions.length; i++) {
+      const lp = lampPositions[i];
+      const d = (lp.x - pp.x) ** 2 + (lp.z - pp.z) ** 2;
+      for (let j = 0; j < LAMP_LIGHT_COUNT; j++) {
+        if (d < nearest[j]) {
+          for (let k = LAMP_LIGHT_COUNT - 1; k > j; k--) { nearest[k] = nearest[k-1]; nearestIdx[k] = nearestIdx[k-1]; }
+          nearest[j] = d; nearestIdx[j] = i; break;
+        }
+      }
+    }
     for (let i = 0; i < LAMP_LIGHT_COUNT; i++) {
-      const lp = lampPositions[dists[i].i];
-      lampLights[i].position.copy(lp);
+      lampLights[i].position.copy(lampPositions[nearestIdx[i]]);
       lampLights[i].intensity = lampLightIntensity;
     }
   } else {
     for (const ll of lampLights) ll.intensity = 0;
   }
 
-  // Wind: always blow "screen-right" (perpendicular to camera) for best visibility
+  // Wind (always screen-right)
   const windMul = Math.max(0.3, weather.windSpeed / 10);
-  const camRight = new THREE.Vector3().crossVectors(lookDir, new THREE.Vector3(0, 1, 0)).normalize();
-  const wdX = camRight.x * windMul;
-  const wdZ = camRight.z * windMul;
+  const camRight = new THREE.Vector3().crossVectors(lookDir, new THREE.Vector3(0,1,0)).normalize();
+  const wdX = camRight.x * windMul, wdZ = camRight.z * windMul;
 
-  // Clouds drift across screen
-  for (const c of clouds) {
-    c.mesh.position.x += (Math.sin(c.dir) * c.speed * 0.3 + wdX * 2) * dt;
-    c.mesh.position.z += (Math.cos(c.dir) * c.speed * 0.3 + wdZ * 2) * dt;
+  // ── Update animated instances ──
+
+  // Clouds
+  if (cloudMesh) {
+    for (let i = 0; i < cloudData.length; i++) {
+      const c = cloudData[i];
+      c.x += (Math.sin(c.dir) * c.speed * 0.3 + wdX * 2) * dt;
+      c.z += (Math.cos(c.dir) * c.speed * 0.3 + wdZ * 2) * dt;
+      _d.position.set(c.x, c.y, c.z);
+      _d.scale.set(15 + i * 0.6, 2 + (i % 5) * 0.4, 8 + (i % 7) * 1.2); // approximate original sizes
+      _d.rotation.set(0, i * 0.5, 0);
+      _d.updateMatrix();
+      cloudMesh.setMatrixAt(i, _d.matrix);
+    }
+    cloudMesh.instanceMatrix.needsUpdate = true;
   }
 
-  // Birds fly in circles
-  for (const b of birds) {
-    const t2 = time * b.speed * 0.1 + b.phase;
-    const radius = 8;
-    b.mesh.position.x = b.cx + b.ox + Math.sin(t2 + b.dir) * radius;
-    b.mesh.position.z = b.cz + b.oz + Math.cos(t2 + b.dir) * radius;
-    b.mesh.position.y = b.cy + b.oy + Math.sin(time * 2 + b.phase) * 0.5;
+  // Birds
+  if (birdMesh) {
+    for (let i = 0; i < birdData.length; i++) {
+      const b = birdData[i];
+      const t2 = time * b.speed * 0.1 + b.phase;
+      const bx = b.cx + b.ox + Math.sin(t2 + b.dir) * 8;
+      const bz = b.cz + b.oz + Math.cos(t2 + b.dir) * 8;
+      const by = b.cy + b.oy + Math.sin(time * 2 + b.phase) * 0.5;
+      _d.position.set(bx, by, bz);
+      _d.scale.set(0.3, 0.1, 0.15);
+      _d.rotation.set(0, t2 + b.dir, 0);
+      _d.updateMatrix();
+      birdMesh.setMatrixAt(i, _d.matrix);
+    }
+    birdMesh.instanceMatrix.needsUpdate = true;
   }
 
-  // Particles follow player, blow across screen
+  // Particles (follow player)
   particleGroup.position.set(pp.x, 0, pp.z);
-  for (const p of particles) {
+  for (const p of particleData) {
+    const m = particleMeshes[p.type];
+    if (!m) continue;
     const t2 = time * p.driftSpeed * windMul + p.phase;
-    p.mesh.position.x = p.offsetX + Math.sin(t2) * 4 * windMul + wdX * 3 * Math.sin(time * 0.5 + p.phase);
-    p.mesh.position.y = p.offsetY + Math.sin(time * p.bobSpeed + p.phase) * p.bobAmp;
-    p.mesh.position.z = p.offsetZ + Math.cos(t2 * 0.7) * 4 * windMul + wdZ * 3 * Math.sin(time * 0.5 + p.phase);
-    p.mesh.rotation.y = time * p.spinSpeed * windMul;
-    p.mesh.rotation.x = time * p.spinSpeed * 0.5 * windMul;
+    const px = p.offsetX + Math.sin(t2) * 4 * windMul + wdX * 3 * Math.sin(time * 0.5 + p.phase);
+    const py = p.offsetY + Math.sin(time * p.bobSpeed + p.phase) * p.bobAmp;
+    const pz = p.offsetZ + Math.cos(t2 * 0.7) * 4 * windMul + wdZ * 3 * Math.sin(time * 0.5 + p.phase);
+    _d.position.set(px, py, pz);
+    _d.rotation.set(time * p.spinSpeed * 0.5 * windMul, time * p.spinSpeed * windMul, 0);
+    // Reuse original scale from creation
+    const sz = p.type === 0 ? 0.08 : p.type === 1 ? 0.04 : 0.03;
+    const s = sz + sz * (p.phase / Math.PI); // deterministic variation
+    _d.scale.set(s, s * 0.3, s);
+    _d.updateMatrix();
+    m.setMatrixAt(p.idx, _d.matrix);
   }
+  for (const m of particleMeshes) { if (m) m.instanceMatrix.needsUpdate = true; }
 
-  // Rain — falls diagonally, drop mesh aligned to velocity vector
+  // Rain — compute tilt once, apply to all drops
   rainGroup.position.set(pp.x, 0, pp.z);
-  const rainDriftX = wdX * 0.3;
-  const rainDriftZ = wdZ * 0.3;
-  for (const r of rainDrops) {
-    const horizSpeed = r.speed * windMul * 0.3;
-    r.mesh.position.y -= r.speed * dt;
-    r.ox += rainDriftX * r.speed * dt;
-    r.oz += rainDriftZ * r.speed * dt;
-    r.mesh.position.x = r.ox;
-    r.mesh.position.z = r.oz;
-    // Align drop to its velocity: point from current pos toward (pos + velocity)
-    const vy = -r.speed;
-    const vx = rainDriftX * r.speed;
-    const vz = rainDriftZ * r.speed;
-    r.mesh.lookAt(r.mesh.position.x + vx, r.mesh.position.y + vy, r.mesh.position.z + vz);
-    if (r.mesh.position.y < 0) {
-      r.mesh.position.y = 17 + Math.random() * 5;
-      r.ox = (Math.random() - 0.5) * 65;
-      r.oz = (Math.random() - 0.5) * 65;
+  if (rainData.length > 0) {
+    const rainDriftX = wdX * 0.3, rainDriftZ = wdZ * 0.3;
+    // Compute shared rain orientation (all drops tilt same direction)
+    _d.position.set(0, 10, 0);
+    _d.lookAt(rainDriftX * 10, 10 - 10, rainDriftZ * 10);
+    const rqx = _d.quaternion.x, rqy = _d.quaternion.y, rqz = _d.quaternion.z, rqw = _d.quaternion.w;
+
+    for (let i = 0; i < rainData.length; i++) {
+      const r = rainData[i];
+      r.y -= r.speed * dt;
+      r.ox += rainDriftX * r.speed * dt;
+      r.oz += rainDriftZ * r.speed * dt;
+      if (r.y < 0) {
+        r.y = 17 + Math.random() * 5;
+        r.ox = (Math.random() - 0.5) * 65;
+        r.oz = (Math.random() - 0.5) * 65;
+      }
+      _d.position.set(r.ox, r.y, r.oz);
+      _d.quaternion.set(rqx, rqy, rqz, rqw);
+      _d.scale.set(r.w, r.len, r.w);
+      _d.updateMatrix();
+      rainMesh.setMatrixAt(i, _d.matrix);
     }
+    rainMesh.instanceMatrix.needsUpdate = true;
   }
 
-  // Snow — drifts diagonally across screen with sway
+  // Snow
   snowGroup.position.set(pp.x, 0, pp.z);
-  for (const s of snowFlakes) {
-    s.mesh.position.y -= s.speed * dt;
-    s.ox += wdX * s.speed * 0.5 * dt;
-    s.oz += wdZ * s.speed * 0.5 * dt;
-    s.mesh.position.x = s.ox + Math.sin(time * 0.5 + s.drift) * 3;
-    s.mesh.position.z = s.oz + Math.cos(time * 0.3 + s.drift) * 3;
-    s.mesh.rotation.y = time * 0.5;
-    s.mesh.rotation.x = time * 0.3 + s.drift;
-    if (s.mesh.position.y < 0) {
-      s.mesh.position.y = 15 + Math.random() * 5;
-      s.ox = (Math.random() - 0.5) * 60;
-      s.oz = (Math.random() - 0.5) * 60;
+  if (snowData.length > 0) {
+    for (let i = 0; i < snowData.length; i++) {
+      const s = snowData[i];
+      s.y -= s.speed * dt;
+      s.ox += wdX * s.speed * 0.5 * dt;
+      s.oz += wdZ * s.speed * 0.5 * dt;
+      if (s.y < 0) {
+        s.y = 15 + Math.random() * 5;
+        s.ox = (Math.random() - 0.5) * 60;
+        s.oz = (Math.random() - 0.5) * 60;
+      }
+      const sx = s.ox + Math.sin(time * 0.5 + s.drift) * 3;
+      const sz = s.oz + Math.cos(time * 0.3 + s.drift) * 3;
+      _d.position.set(sx, s.y, sz);
+      _d.rotation.set(time * 0.3 + s.drift, time * 0.5, 0);
+      _d.scale.set(s.size, s.size, s.size);
+      _d.updateMatrix();
+      snowMesh.setMatrixAt(i, _d.matrix);
     }
+    snowMesh.instanceMatrix.needsUpdate = true;
   }
 
   renderer.render(scene, camera);
 }
 
-// ── Resize (maintain 9:16) ──
+// ── Resize ──
 window.addEventListener('resize', () => {
   const { w, h } = calcSize();
   renderer.setSize(w, h);
