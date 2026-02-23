@@ -24,9 +24,6 @@
   #weather-panel select { background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; padding: 2px 4px; font-size: 11px; }
   #weather-panel .val { min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
   #weather-panel .divider { border-top: 1px solid rgba(255,255,255,0.15); margin: 6px 0; }
-  #weather-panel .mode-toggle { display: flex; gap: 4px; margin-bottom: 6px; }
-  #weather-panel .mode-toggle button { flex: 1; background: #333; color: #aaa; border: 1px solid #555; border-radius: 4px; padding: 3px 0; font-size: 11px; cursor: pointer; }
-  #weather-panel .mode-toggle button.active { background: #4af; color: #000; border-color: #4af; }
 </style>
 </head>
 <body>
@@ -35,11 +32,7 @@
   <div class="panel-header" onclick="this.parentElement.classList.toggle('collapsed')">
     <h3>Weather Control</h3><span>&#9662;</span>
   </div>
-  <div class="mode-toggle">
-    <button id="btn-auto" class="active" onclick="window.setWeatherMode('auto')">실시간</button>
-    <button id="btn-manual" onclick="window.setWeatherMode('manual')">수동</button>
-  </div>
-  <div id="manual-controls" style="display:none">
+  <div id="manual-controls">
     <label><span>시간</span><input type="range" id="sl-hour" min="0" max="23" value="12"><span class="val" id="v-hour">12h</span></label>
     <label><span>날씨</span>
       <select id="sel-weather">
@@ -61,10 +54,6 @@
     </label>
     <div class="divider"></div>
     <label><span>풍속</span><input type="range" id="sl-wind" min="0" max="50" value="3"><span class="val" id="v-wind">3</span></label>
-  </div>
-  <div id="auto-info">
-    <div class="divider"></div>
-    <div id="weather-status" style="opacity:0.7;font-size:11px">날씨 불러오는 중...</div>
   </div>
 </div>
 
@@ -138,33 +127,7 @@ const clock = new THREE.Clock();
 // ══════════════════════════════════════════════════════════════
 //  Weather state
 // ══════════════════════════════════════════════════════════════
-let weatherMode = 'auto';
-const weather = { windSpeed: 3, windDir: 0, code: 0, isDay: 1, temp: 15, hour: new Date().getHours() };
-
-async function fetchWeatherData() {
-  try {
-    const pos = await new Promise((res) => {
-      navigator.geolocation
-        ? navigator.geolocation.getCurrentPosition(
-            p => res({ lat: p.coords.latitude, lon: p.coords.longitude }),
-            () => res({ lat: 37.5665, lon: 126.978 }), { timeout: 3000 })
-        : res({ lat: 37.5665, lon: 126.978 });
-    });
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${pos.lat}&longitude=${pos.lon}&current=temperature_2m,wind_speed_10m,wind_direction_10m,weather_code,is_day`;
-    const r = await fetch(url);
-    const d = await r.json();
-    const c = d.current;
-    weather.windSpeed = c.wind_speed_10m;
-    weather.windDir = (c.wind_direction_10m * Math.PI) / 180;
-    weather.code = c.weather_code;
-    weather.isDay = c.is_day;
-    weather.temp = c.temperature_2m;
-    applyWeather();
-    updateWeatherStatus();
-  } catch (e) { console.warn('Weather fetch failed, using defaults'); applyWeather(); }
-}
-fetchWeatherData();
-setInterval(() => { if (weatherMode === 'auto') fetchWeatherData(); }, 600000);
+const weather = { windSpeed: 3, windDir: 0, code: 0, isDay: 1, temp: 15, hour: 12 };
 
 // ══════════════════════════════════════════════════════════════
 //  Time-of-day presets
@@ -273,7 +236,7 @@ function setupPrecipitation(type, cfg) {
 //  Apply weather + time
 // ══════════════════════════════════════════════════════════════
 function applyWeather() {
-  if (weatherMode !== 'manual') weather.hour = new Date().getHours();
+  // weather.hour is set by manual controls
   const tp = getTimePreset(weather.hour);
 
   const cc = weather.code;
@@ -330,24 +293,10 @@ function applyWeather() {
   else if (c === 71)             setupPrecipitation('snow', { count: 80, flakeSize: 0.06, speed: 1.0, opacity: 0.7, spread: 50 });
   else                           setupPrecipitation('none', null);
 }
-applyWeather();
 
 // ══════════════════════════════════════════════════════════════
-//  Weather panel controls
+//  Weather panel controls (manual only)
 // ══════════════════════════════════════════════════════════════
-const weatherLabels = { 0:'맑음',2:'구름 조금',3:'흐림',45:'안개',51:'이슬비',53:'가랑비',55:'보슬비',61:'비',63:'큰비',65:'폭우',71:'싸락눈',73:'눈',75:'폭설',80:'소나기(약)',81:'소나기',82:'소나기(강)',85:'눈보라(약)',86:'눈보라',95:'뇌우' };
-
-function setWeatherMode(mode) {
-  weatherMode = mode;
-  document.getElementById('btn-auto').classList.toggle('active', mode === 'auto');
-  document.getElementById('btn-manual').classList.toggle('active', mode === 'manual');
-  document.getElementById('manual-controls').style.display = mode === 'manual' ? 'block' : 'none';
-  document.getElementById('auto-info').style.display = mode === 'auto' ? 'block' : 'none';
-  if (mode === 'auto') fetchWeatherData();
-  else applyManualWeather();
-}
-window.setWeatherMode = setWeatherMode;
-
 function applyManualWeather() {
   const hour = parseInt(document.getElementById('sl-hour').value);
   const code = parseInt(document.getElementById('sel-weather').value);
@@ -359,14 +308,10 @@ function applyManualWeather() {
   applyWeather();
 }
 
-function updateWeatherStatus() {
-  const codeText = weatherLabels[weather.code] || `코드${weather.code}`;
-  document.getElementById('weather-status').textContent = `${weather.temp}\u00B0C \u00B7 ${codeText} \u00B7 풍속 ${weather.windSpeed}km/h`;
-}
-
 document.getElementById('sl-hour').addEventListener('input', applyManualWeather);
 document.getElementById('sel-weather').addEventListener('change', applyManualWeather);
 document.getElementById('sl-wind').addEventListener('input', applyManualWeather);
+applyManualWeather();
 
 // ══════════════════════════════════════════════════════════════
 //  Track path
