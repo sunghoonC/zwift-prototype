@@ -987,14 +987,29 @@ function animate() {
   }
   for (const m of particleMeshes) { if (m) m.instanceMatrix.needsUpdate = true; }
 
-  // Rain — compute tilt once, apply to all drops
+  // Rain — compute tilt once (align Y-axis to velocity), apply to all drops
   rainGroup.position.set(pp.x, 0, pp.z);
   if (rainData.length > 0) {
     const rainDriftX = wdX * 0.3, rainDriftZ = wdZ * 0.3;
-    // Compute shared rain orientation (all drops tilt same direction)
-    _d.position.set(0, 10, 0);
-    _d.lookAt(rainDriftX * 10, 10 - 10, rainDriftZ * 10);
-    const rqx = _d.quaternion.x, rqy = _d.quaternion.y, rqz = _d.quaternion.z, rqw = _d.quaternion.w;
+    // Velocity direction (shared by all drops): (rainDriftX, -1, rainDriftZ) normalized
+    const vx = rainDriftX, vy = -1, vz = rainDriftZ;
+    const vLen = Math.sqrt(vx*vx + vy*vy + vz*vz);
+    const nx = vx/vLen, ny = vy/vLen, nz = vz/vLen;
+    // Quaternion that rotates Y-axis (0,1,0) to velocity direction (nx,ny,nz)
+    // Using axis = cross(Y, vel), angle = acos(dot(Y, vel))
+    // cross(Y, n) = (nz, 0, -nx), dot(Y, n) = ny
+    const ax = nz, ay = 0, az = -nx;
+    const sinA = Math.sqrt(ax*ax + az*az);
+    const cosA = ny;
+    const halfAngle = Math.atan2(sinA, cosA) / 2;
+    const sh = Math.sin(halfAngle);
+    const ch = Math.cos(halfAngle);
+    let rqx, rqy, rqz, rqw;
+    if (sinA > 0.0001) {
+      rqx = (ax/sinA)*sh; rqy = (ay/sinA)*sh; rqz = (az/sinA)*sh; rqw = ch;
+    } else {
+      rqx = 0; rqy = 0; rqz = 0; rqw = 1;
+    }
 
     for (let i = 0; i < rainData.length; i++) {
       const r = rainData[i];
