@@ -133,23 +133,23 @@ const weather = { windSpeed: 3, windDir: 0, code: 0, isDay: 1, temp: 15, hour: 1
 //  Time-of-day presets
 // ══════════════════════════════════════════════════════════════
 function getTimePreset(hour) {
-  if (hour >= 21 || hour < 5)   return { sky: 0x0f1535, fog: 0x0f1535, ambient: 0x4466aa, ambientI: 0.7, hemiSky: 0x223355, hemiGround: 0x222233, hemiI: 0.5, sunColor: 0x8899cc, sunI: 0.5, exposure: 1.3, shadowI: 0.1 };
-  if (hour >= 5 && hour < 7)    return { sky: 0xff8844, fog: 0xdd7744, ambient: 0xcc8866, ambientI: 0.7, hemiSky: 0xff9955, hemiGround: 0x554433, hemiI: 0.6, sunColor: 0xffaa55, sunI: 0.9, exposure: 1.4, shadowI: 0.2 };
-  if (hour >= 7 && hour < 10)   return { sky: 0x99ccee, fog: 0x99ccee, ambient: 0x99aabb, ambientI: 0.7, hemiSky: 0x99ccee, hemiGround: 0x556633, hemiI: 0.6, sunColor: 0xfff0d0, sunI: 1.2, exposure: 1.5, shadowI: 0.25 };
-  if (hour >= 10 && hour < 16)  return { sky: 0x87CEEB, fog: 0x87CEEB, ambient: 0x8899bb, ambientI: 0.8, hemiSky: 0x87CEEB, hemiGround: 0x556633, hemiI: 0.7, sunColor: 0xfff4e0, sunI: 1.4, exposure: 1.6, shadowI: 0.3 };
-  if (hour >= 16 && hour < 19)  return { sky: 0xdd8855, fog: 0xcc7744, ambient: 0xbb8866, ambientI: 0.7, hemiSky: 0xee8844, hemiGround: 0x554433, hemiI: 0.6, sunColor: 0xffaa44, sunI: 1.0, exposure: 1.4, shadowI: 0.2 };
-  /* 19-21 */                    return { sky: 0x1a2744, fog: 0x1a2744, ambient: 0x556688, ambientI: 0.6, hemiSky: 0x334466, hemiGround: 0x333333, hemiI: 0.5, sunColor: 0x9999bb, sunI: 0.6, exposure: 1.3, shadowI: 0.15 };
+  if (hour >= 21 || hour < 5)   return { sky: 0x152040, fog: 0x152040, ambient: 0x6688cc, ambientI: 1.0, hemiSky: 0x334466, hemiGround: 0x333344, hemiI: 0.7, sunColor: 0xaabbdd, sunI: 0.7, exposure: 1.6, shadowI: 0.1 };
+  if (hour >= 5 && hour < 7)    return { sky: 0xffaa66, fog: 0xee9966, ambient: 0xddaa88, ambientI: 1.0, hemiSky: 0xffbb77, hemiGround: 0x776644, hemiI: 0.8, sunColor: 0xffbb66, sunI: 1.2, exposure: 1.7, shadowI: 0.2 };
+  if (hour >= 7 && hour < 10)   return { sky: 0xaaddff, fog: 0xaaddff, ambient: 0xbbccdd, ambientI: 1.0, hemiSky: 0xaaddff, hemiGround: 0x77aa55, hemiI: 0.9, sunColor: 0xfff4dd, sunI: 1.5, exposure: 1.8, shadowI: 0.25 };
+  if (hour >= 10 && hour < 16)  return { sky: 0x99ddff, fog: 0x99ddff, ambient: 0xccddff, ambientI: 1.2, hemiSky: 0xaaddff, hemiGround: 0x88aa55, hemiI: 1.0, sunColor: 0xfff8ee, sunI: 1.8, exposure: 2.0, shadowI: 0.3 };
+  if (hour >= 16 && hour < 19)  return { sky: 0xee9966, fog: 0xdd8855, ambient: 0xddaa88, ambientI: 1.0, hemiSky: 0xffaa66, hemiGround: 0x776644, hemiI: 0.8, sunColor: 0xffbb55, sunI: 1.3, exposure: 1.7, shadowI: 0.2 };
+  /* 19-21 */                    return { sky: 0x223355, fog: 0x223355, ambient: 0x7788aa, ambientI: 0.8, hemiSky: 0x445577, hemiGround: 0x444444, hemiI: 0.7, sunColor: 0xaaaacc, sunI: 0.8, exposure: 1.6, shadowI: 0.15 };
 }
 
 // ══════════════════════════════════════════════════════════════
 //  Lighting
 // ══════════════════════════════════════════════════════════════
-const ambientLight = new THREE.AmbientLight(0x8899bb, 0.8);
+const ambientLight = new THREE.AmbientLight(0xccddff, 1.2);
 scene.add(ambientLight);
-const hemiLight = new THREE.HemisphereLight(0x87CEEB, 0x556633, 0.7);
+const hemiLight = new THREE.HemisphereLight(0xaaddff, 0x88aa55, 1.0);
 scene.add(hemiLight);
 
-const sun = new THREE.DirectionalLight(0xfff4e0, 1.4);
+const sun = new THREE.DirectionalLight(0xfff8ee, 1.8);
 sun.position.set(80, 100, 60);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
@@ -355,7 +355,7 @@ const trackLength = trackPath.getLength();
 // ── Ground ──
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(1200, 1200),
-  new THREE.MeshStandardMaterial({ color: 0x4a7c3f, roughness: 0.95 })
+  new THREE.MeshStandardMaterial({ color: 0x5a9c4f, roughness: 0.9 })
 );
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
